@@ -7,6 +7,7 @@ import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/li
 import { DashboardOverview, MarketQuote, HoldingMover } from '@/types';
 import AppShell from '@/components/layout/AppShell';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
+import { SectorPieChart, TopHoldingsList } from '@/components/charts';
 
 export default function DashboardPage() {
   const { toast } = useToast();
@@ -89,6 +90,43 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <MoverCard title="Top Gainers" rows={overview?.topGainers} loading={overviewLoading} positive />
           <MoverCard title="Top Losers" rows={overview?.topLosers} loading={overviewLoading} positive={false} />
+        </div>
+
+        {/* ---- Sector allocation / Top holdings ---- */}
+        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="Sector Allocation"
+              subtitle="Combined holdings across every client, ETFs looked through to underlying sectors"
+            />
+            <div className="mt-4 flex-1">
+              {overviewLoading || !overview ? (
+                <div className="flex h-full min-h-[320px] items-center justify-center">
+                  <Skeleton className="h-[220px] w-[220px] rounded-full" />
+                </div>
+              ) : (
+                <SectorPieChart allocation={overview.sectorAllocation} />
+              )}
+            </div>
+          </Card>
+
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="Top Holdings"
+              subtitle="Top 10 stocks by combined market value across every client"
+            />
+            <div className="mt-4 flex-1">
+              {overviewLoading || !overview ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-9 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <TopHoldingsList holdings={overview.topHoldings} />
+              )}
+            </div>
+          </Card>
         </div>
 
         {/* ---- Market overview ---- */}

@@ -310,6 +310,24 @@ export interface DashboardOverview {
   numHoldings: number;
   topGainers: HoldingMover[];
   topLosers: HoldingMover[];
+  /** House-wide sector mix across every client's holdings combined, ETFs look-through applied. */
+  sectorAllocation: AllocationSlice[];
+  /** House-wide holdings grouped by ticker across every client, ranked by combined market value. */
+  topHoldings: TopHolding[];
+}
+
+export interface TopHolding {
+  ticker: string;
+  company: string;
+  marketValue: number;
+  weight: number;
+  numClients: number;
+}
+
+export interface AllocationSlice {
+  key: string;
+  value: number;
+  weight: number;
 }
 
 export interface MarketQuote {

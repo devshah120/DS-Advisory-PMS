@@ -1,5 +1,5 @@
 import { apiClient } from './api';
-import { AccountingMethod } from '@/types';
+import { AccountingMethod, AllocationSlice } from '@/types';
 
 /**
  * The Performance sheet's contract with the engine.
@@ -33,12 +33,6 @@ export interface PerformerRow {
 }
 
 export interface TopHolding extends PerformerRow {
-  weight: number;
-}
-
-export interface AllocationSlice {
-  key: string;
-  value: number;
   weight: number;
 }
 
