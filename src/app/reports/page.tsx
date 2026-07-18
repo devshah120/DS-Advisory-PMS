@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
+import { downloadClientFeeWorkbook } from '@/lib/feeExport';
 import { ClientFeeRow } from '@/types/reports';
 import AppShell from '@/components/layout/AppShell';
 import { Card, CardHeader, Badge, Button, useToast } from '@/components/ui';
@@ -111,6 +112,7 @@ export default function ReportsPage() {
 
   const [fees, setFees] = useState<ClientFeeRow[]>([]);
   const [feesLoading, setFeesLoading] = useState(true);
+  const [exportingId, setExportingId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -133,28 +135,18 @@ export default function ReportsPage() {
     }, 900);
   };
 
-  const exportFees = () => {
-    const header = ['Client', 'Quarter', 'Fee Rate (Annual)', 'Portfolio Value', 'Days Billed', 'Days in Quarter', 'Fee Amount', 'Status'];
-    const rows = fees.map((f) => [
-      f.clientName,
-      f.quarterLabel,
-      `${f.feeRatePercent}%`,
-      f.portfolioValue,
-      f.daysBilled,
-      f.daysInQuarter,
-      f.feeAmount.toFixed(2),
-      f.isEstimate ? 'Estimate (quarter in progress)' : 'Final',
-    ]);
-    const csv = [header, ...rows]
-      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `fee-schedule-${fees[0]?.quarterLabel.replace(/\s+/g, '_') ?? 'current'}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+  const exportClientFee = async (fee: ClientFeeRow) => {
+    setExportingId(fee.clientId);
+    try {
+      await downloadClientFeeWorkbook(fee);
+    } catch {
+      toast({ tone: 'error', title: `Failed to export ${fee.clientName}` });
+    } finally {
+      setExportingId(null);
+    }
   };
+
+  const totalFeeAmount = fees.reduce((sum, f) => sum + f.feeAmount, 0);
 
   return (
     <AppShell
@@ -208,20 +200,11 @@ export default function ReportsPage() {
 
         {/* Fee Schedule */}
         <Card padding="none">
-          <div className="flex items-center justify-between px-5 py-5">
+          <div className="px-5 py-5">
             <CardHeader
               title="Fee Schedule"
               subtitle={fees[0] ? `${fees[0].quarterLabel} · management fees, prorated by inception date` : 'Current-quarter management fees'}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<Download className="h-3.5 w-3.5" />}
-              onClick={exportFees}
-              disabled={fees.length === 0}
-            >
-              Export
-            </Button>
           </div>
           <table className="w-full">
             <thead>
@@ -232,18 +215,19 @@ export default function ReportsPage() {
                 <th className="px-5 py-2.5 text-right">Days Billed</th>
                 <th className="px-5 py-2.5 text-right">Fee Amount</th>
                 <th className="px-5 py-2.5">Status</th>
+                <th className="px-5 py-2.5 text-right">Export</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {feesLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                  <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
                     Loading…
                   </td>
                 </tr>
               ) : fees.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                  <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
                     No clients to bill.
                   </td>
                 </tr>
@@ -275,10 +259,34 @@ export default function ReportsPage() {
                         {f.isEstimate ? 'Estimate' : 'Final'}
                       </Badge>
                     </td>
+                    <td className="px-5 py-3 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Download className="h-3.5 w-3.5" />}
+                        loading={exportingId === f.clientId}
+                        onClick={() => exportClientFee(f)}
+                      >
+                        Export
+                      </Button>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
+            {!feesLoading && fees.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-border bg-surface-2">
+                  <td className="px-5 py-3 text-[13px] font-semibold text-ink" colSpan={4}>
+                    Total
+                  </td>
+                  <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                    {formatCurrency(totalFeeAmount)}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
           </table>
         </Card>
 

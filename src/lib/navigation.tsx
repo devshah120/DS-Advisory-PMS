@@ -5,6 +5,7 @@ import {
   ArrowLeftRight,
   LineChart,
   Eye,
+  CalendarClock,
   FileText,
   Settings,
   type LucideIcon,
@@ -39,8 +40,9 @@ export const navSections: NavSection[] = [
   {
     title: 'Insights',
     items: [
-      { label: 'Performance', href: '/performance', icon: LineChart },
       { label: 'Watchlist', href: '/watchlist', icon: Eye },
+      { label: 'Event Center', href: '/events', icon: CalendarClock },
+      { label: 'Performance', href: '/performance', icon: LineChart },
       { label: 'Reports', href: '/reports', icon: FileText },
     ],
   },

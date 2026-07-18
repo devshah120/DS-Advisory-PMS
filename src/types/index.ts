@@ -193,12 +193,26 @@ export interface BenchmarkReturns extends WatchlistReturns {
   symbol: string;
 }
 
+export type PortfolioEventType = 'EARNINGS' | 'DIVIDEND' | 'SPLIT';
+
+export interface PortfolioEvent {
+  ticker: string;
+  company: string;
+  clientCount: number;
+  type: PortfolioEventType;
+  code: 'E' | 'D' | 'C';
+  label: string;
+  date: string;
+  status: 'Upcoming' | 'Confirmed';
+}
+
 // Dashboard Types
 export interface HoldingMover {
   ticker: string;
   company: string;
   clientId: string;
   marketValue: number;
+  currentPrice: number;
   changePercent: number;
 }
 
@@ -214,6 +228,7 @@ export interface MarketQuote {
   code: string;
   label: string;
   symbol: string;
+  currentPrice: number | null;
   dayChangePercent: number | null;
   ytdChangePercent: number | null;
 }

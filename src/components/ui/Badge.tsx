@@ -28,14 +28,16 @@ export function Badge({
   tone = 'neutral',
   dot = false,
   className,
+  title,
 }: {
   children: ReactNode;
   tone?: Tone;
   dot?: boolean;
   className?: string;
+  title?: string;
 }) {
   return (
-    <span className={cn('chip', tones[tone], className)}>
+    <span className={cn('chip', tones[tone], className)} title={title}>
       {dot && <span className={cn('h-1.5 w-1.5 rounded-full', dotTones[tone])} />}
       {children}
     </span>

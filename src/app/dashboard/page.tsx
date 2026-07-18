@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Landmark, Users, TrendingUp, TrendingDown, Briefcase } from 'lucide-react';
 import { dashboardApi } from '@/lib/dashboard.api';
-import { formatCompactCurrency, formatSignedPct, cn } from '@/lib/utils';
+import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/lib/utils';
 import { DashboardOverview, MarketQuote, HoldingMover } from '@/types';
 import AppShell from '@/components/layout/AppShell';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
@@ -164,7 +164,7 @@ function MoverCard({
                 <p className={cn('text-sm font-semibold tabular-nums', row.changePercent >= 0 ? 'text-success' : 'text-danger')}>
                   {formatSignedPct(row.changePercent)}
                 </p>
-                <p className="text-xs text-ink-tertiary tabular-nums">{formatCompactCurrency(row.marketValue)}</p>
+                <p className="text-xs text-ink-tertiary tabular-nums">{formatCurrency(row.currentPrice)}</p>
               </div>
             </div>
           ))
@@ -192,6 +192,7 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
       <thead>
         <tr className="text-left text-xs font-medium text-ink-secondary">
           <th className="pb-2">Name</th>
+          <th className="pb-2 text-right">Price</th>
           <th className="pb-2 text-right">Day</th>
           <th className="pb-2 text-right">YTD</th>
         </tr>
@@ -200,6 +201,9 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
         {quotes.map((q) => (
           <tr key={q.code} className="border-t border-border">
             <td className="py-2.5 font-medium text-ink">{q.label}</td>
+            <td className="py-2.5 text-right tabular-nums text-ink">
+              {q.currentPrice != null ? formatCurrency(q.currentPrice) : '—'}
+            </td>
             <ChangeCell value={q.dayChangePercent} />
             <ChangeCell value={q.ytdChangePercent} />
           </tr>
