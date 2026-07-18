@@ -8,6 +8,7 @@ import {
   CalendarClock,
   FileText,
   Settings,
+  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -42,6 +43,7 @@ export const navSections: NavSection[] = [
     items: [
       { label: 'Watchlist', href: '/watchlist', icon: Eye },
       { label: 'Event Center', href: '/events', icon: CalendarClock },
+      { label: 'Fundamentals', href: '/fundamentals', icon: Gauge },
       { label: 'Performance', href: '/performance', icon: LineChart },
       { label: 'Reports', href: '/reports', icon: FileText },
     ],

@@ -206,6 +206,94 @@ export interface PortfolioEvent {
   status: 'Upcoming' | 'Confirmed';
 }
 
+// Fundamentals Engine Types
+export type FundamentalPillar = 'growth' | 'profitability' | 'financialStrength' | 'valuation' | 'momentum';
+
+export interface MetricScore {
+  pillar: FundamentalPillar;
+  metric: string;
+  value: number | null;
+  matchedRange: { min: number; max: number } | null;
+  score: number | null;
+  weight: number;
+  contribution: number;
+}
+
+export interface IndustryMetricComparison {
+  metric: string;
+  company: number | null;
+  industryAverage: number | null;
+  premiumDiscountPercent: number | null;
+}
+
+export interface IndustryComparisonResult {
+  industry: string;
+  peerCount: number;
+  metrics: IndustryMetricComparison[];
+}
+
+export interface FundamentalExplanation {
+  strengths: string[];
+  weaknesses: string[];
+}
+
+export interface FundamentalSnapshotData {
+  symbol: string;
+  company: string;
+  sector: string;
+  industry: string;
+  marketCap: number | null;
+  peRatio: number | null;
+  forwardPe: number | null;
+  pegRatio: number | null;
+  evToEbitda: number | null;
+  priceToSales: number | null;
+  priceToBook: number | null;
+  enterpriseValue: number | null;
+  revenueQoqPercent: number | null;
+  revenueYoyPercent: number | null;
+  netProfitQoqPercent: number | null;
+  netProfitYoyPercent: number | null;
+  revenueCagr3y: number | null;
+  netProfitCagr3y: number | null;
+  roe: number | null;
+  roic: number | null;
+  grossMargin: number | null;
+  operatingMargin: number | null;
+  netMargin: number | null;
+  debtToEquity: number | null;
+  currentRatio: number | null;
+  interestCoverage: number | null;
+  freeCashFlow: number | null;
+  lastFourEarningsBeatPercent: number | null;
+  nextEarningsDate: string | null;
+  dividendYield: number | null;
+  dividendPerShare: number | null;
+  exDividendDate: string | null;
+  paymentDate: string | null;
+  refreshedAt: string;
+}
+
+export interface FundamentalView {
+  symbol: string;
+  company: string;
+  sector: string;
+  industry: string;
+  marketCap: number | null;
+  strategy: string;
+  overallScore: number;
+  growthScore: number;
+  profitabilityScore: number;
+  financialStrengthScore: number;
+  valuationScore: number;
+  momentumScore: number;
+  breakdown: MetricScore[];
+  explanation: FundamentalExplanation;
+  industryComparison: IndustryComparisonResult | null;
+  snapshot: FundamentalSnapshotData;
+  computedAt: string;
+}
+
 // Dashboard Types
 export interface HoldingMover {
   ticker: string;
