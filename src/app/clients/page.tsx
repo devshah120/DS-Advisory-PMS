@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, Wallet, TrendingUp, PiggyBank, Plus, Trash2 } from 'lucide-react';
+import { Users, Wallet, TrendingUp, PiggyBank, Plus, Trash2, Pencil } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
 import {
   formatCurrency,
@@ -147,17 +147,30 @@ export default function ClientsPage() {
       accessor: () => '',
       align: 'right',
       render: (r) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          leftIcon={<Trash2 className="h-3.5 w-3.5" />}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleDelete(r);
-          }}
-        >
-          Remove
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Pencil className="h-3.5 w-3.5" />}
+            onClick={(e) => {
+              e.stopPropagation();
+              router.push(`/clients/${r.id}/edit`);
+            }}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDelete(r);
+            }}
+          >
+            Remove
+          </Button>
+        </div>
       ),
     },
   ];

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet } from 'lucide-react';
+import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet, Layers, List } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
 import { transactionsApi } from '@/lib/transactions.api';
 import { formatCurrency, formatCompactCurrency, cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { Transaction, Client, TransactionType } from '@/types';
 import AppShell from '@/components/layout/AppShell';
 import { CashFlowModal } from '@/components/transactions/CashFlowModal';
 import { DividendModal } from '@/components/transactions/DividendModal';
+import { GroupedByDate } from '@/components/transactions/GroupedByDate';
 import {
   Card,
   Tabs,
@@ -46,6 +47,7 @@ export default function TransactionsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>('all');
+  const [grouped, setGrouped] = useState(false);
   const [flowModalOpen, setFlowModalOpen] = useState(false);
   const [dividendModalOpen, setDividendModalOpen] = useState(false);
 
@@ -337,16 +339,37 @@ export default function TransactionsPage() {
         )}
 
         {/* Filter */}
-        <Tabs
-          tabs={[
-            { value: 'all', label: 'All', count: txns.length },
-            { value: 'trades', label: 'Trades', count: tradeRows.length },
-            { value: 'income', label: 'Income', count: incomeRows.length },
-            { value: 'flows', label: 'Cash Flows', count: cashFlowRows.length },
-          ]}
-          value={view}
-          onChange={(v) => setView(v as View)}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Tabs
+            tabs={[
+              { value: 'all', label: 'All', count: txns.length },
+              { value: 'trades', label: 'Trades', count: tradeRows.length },
+              { value: 'income', label: 'Income', count: incomeRows.length },
+              { value: 'flows', label: 'Cash Flows', count: cashFlowRows.length },
+            ]}
+            value={view}
+            onChange={(v) => setView(v as View)}
+          />
+
+          {view !== 'flows' && (
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={grouped ? <List className="h-3.5 w-3.5" /> : <Layers className="h-3.5 w-3.5" />}
+              onClick={() => setGrouped((v) => !v)}
+            >
+              {grouped ? 'Show all rows' : 'Group by date'}
+            </Button>
+          )}
+        </div>
+
+        {grouped && view !== 'flows' && (
+          <p className="-mt-2 text-[13px] leading-relaxed text-ink-secondary">
+            One row per deployment date — the total cash moved across every instrument bought or
+            sold that day. Expand a date to see the individual entries; each one still counts on
+            its own toward the client's XIRR.
+          </p>
+        )}
 
         {view === 'flows' && (
           <p className="-mt-2 text-[13px] leading-relaxed text-ink-secondary">
@@ -366,37 +389,41 @@ export default function TransactionsPage() {
           </p>
         )}
 
-        <DataTable
-          columns={view === 'flows' ? flowColumns : columns}
-          data={filtered}
-          loading={loading}
-          rowKey={(r) => r.id}
-          searchPlaceholder="Search by instrument or client…"
-          searchKeys={(r) => `${r.ticker ?? ''} ${r.client?.name ?? ''} ${r.type}`}
-          onExport={(rows) => {
-            // Export what is on screen — the flows view has its own column set.
-            exportToCsv(
-              view === 'flows' ? 'cash-flows.csv' : 'transactions.csv',
-              view === 'flows' ? flowColumns : columns,
-              rows
-            );
-            toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
-          }}
-          emptyTitle={
-            view === 'flows'
-              ? 'No cash flows yet'
-              : view === 'income'
-                ? 'No income recorded'
-                : 'No transactions yet'
-          }
-          emptyDescription={
-            view === 'flows'
-              ? 'Nothing here yet. Cash-flow clients need their inflows recorded; transaction-based clients need at least one buy. XIRR cannot be calculated without either.'
-              : view === 'income'
-                ? 'Dividends received and fees paid will appear here.'
-                : 'Recorded trades and cash activity will appear here.'
-          }
-        />
+        {grouped && view !== 'flows' ? (
+          <GroupedByDate rows={filtered} columns={columns} rowKey={(r) => r.id} />
+        ) : (
+          <DataTable
+            columns={view === 'flows' ? flowColumns : columns}
+            data={filtered}
+            loading={loading}
+            rowKey={(r) => r.id}
+            searchPlaceholder="Search by instrument or client…"
+            searchKeys={(r) => `${r.ticker ?? ''} ${r.client?.name ?? ''} ${r.type}`}
+            onExport={(rows) => {
+              // Export what is on screen — the flows view has its own column set.
+              exportToCsv(
+                view === 'flows' ? 'cash-flows.csv' : 'transactions.csv',
+                view === 'flows' ? flowColumns : columns,
+                rows
+              );
+              toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+            }}
+            emptyTitle={
+              view === 'flows'
+                ? 'No cash flows yet'
+                : view === 'income'
+                  ? 'No income recorded'
+                  : 'No transactions yet'
+            }
+            emptyDescription={
+              view === 'flows'
+                ? 'Nothing here yet. Cash-flow clients need their inflows recorded; transaction-based clients need at least one buy. XIRR cannot be calculated without either.'
+                : view === 'income'
+                  ? 'Dividends received and fees paid will appear here.'
+                  : 'Recorded trades and cash activity will appear here.'
+            }
+          />
+        )}
       </div>
 
       <CashFlowModal
