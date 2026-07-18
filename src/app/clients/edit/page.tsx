@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
 import AppShell from '@/components/layout/AppShell';
@@ -9,19 +9,32 @@ import { Skeleton, useToast } from '@/components/ui';
 import ClientForm, { ClientFormValues } from '@/components/clients/ClientForm';
 
 export default function EditClientPage() {
+  return (
+    <Suspense fallback={null}>
+      <EditClientPageInner />
+    </Suspense>
+  );
+}
+
+function EditClientPageInner() {
   const router = useRouter();
-  const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const id = searchParams.get('id');
   const { toast } = useToast();
   const [initial, setInitial] = useState<ClientFormValues | null>(null);
-  const [clientName, setClientName] = useState('');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      setNotFound(true);
+      return;
+    }
+
     (async () => {
       try {
-        const client = await clientsApi.get(params.id);
-        setClientName(client.name);
+        const client = await clientsApi.get(id);
         setInitial({
           name: client.name,
           broker: client.broker,
@@ -43,7 +56,7 @@ export default function EditClientPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.id]);
+  }, [id]);
 
   return (
     <AppShell title="Edit Client" subtitle="Update this mandate's details">
@@ -69,14 +82,14 @@ export default function EditClientPage() {
           </p>
         )}
 
-        {!loading && initial && (
+        {!loading && initial && id && (
           <ClientForm
             mode="edit"
             initial={initial}
             lockAccountingMethod
             onCancel={() => router.back()}
             onSubmit={async (payload) => {
-              const updated = await clientsApi.update(params.id, payload);
+              const updated = await clientsApi.update(id, payload);
               toast({
                 tone: 'success',
                 title: 'Client updated',

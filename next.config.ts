@@ -1,10 +1,11 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  output: 'export',
   reactStrictMode: true,
   outputFileTracingRoot: __dirname,
   images: {
-    unoptimized: process.env.NODE_ENV === 'development',
+    unoptimized: true,
   },
 };
 

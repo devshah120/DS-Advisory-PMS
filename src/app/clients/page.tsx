@@ -154,7 +154,7 @@ export default function ClientsPage() {
             leftIcon={<Pencil className="h-3.5 w-3.5" />}
             onClick={(e) => {
               e.stopPropagation();
-              router.push(`/clients/${r.id}/edit`);
+              router.push(`/clients/edit?id=${r.id}`);
             }}
           >
             Edit
