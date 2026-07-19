@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { TrendingUp, Coins, Split } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { TrendingUp, Coins, Split, RefreshCw } from 'lucide-react';
 import { eventsApi } from '@/lib/events.api';
 import { formatDate, cn } from '@/lib/utils';
 import { PortfolioEvent, PortfolioEventType } from '@/types';
 import AppShell from '@/components/layout/AppShell';
-import { Badge, DataTable, useToast, type Column } from '@/components/ui';
+import { Badge, Button, DataTable, useToast, type Column } from '@/components/ui';
 import { exportToCsv } from '@/components/ui';
 
 const TYPE_META: Record<
@@ -29,20 +29,37 @@ export default function EventCenterPage() {
   const { toast } = useToast();
   const [events, setEvents] = useState<PortfolioEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [typeFilter, setTypeFilter] = useState<PortfolioEventType | 'ALL'>('ALL');
 
+  const load = useCallback(async () => {
+    try {
+      setEvents(await eventsApi.forHoldings());
+    } catch {
+      toast({ tone: 'error', title: 'Failed to load the event calendar' });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
-    let mounted = true;
-    eventsApi
-      .forHoldings()
-      .then((data) => mounted && setEvents(data))
-      .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load the event calendar' }))
-      .finally(() => mounted && setLoading(false));
-    return () => {
-      mounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void load();
+  }, [load]);
+
+  // Spends FMP request budget (3 calendar requests): re-fetches the FMP
+  // calendars into the DB snapshot, then reloads the page from that snapshot.
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const { refreshed } = await eventsApi.refresh();
+      await load();
+      toast({ tone: 'success', title: `Event calendar refreshed — ${refreshed} events` });
+    } catch {
+      toast({ tone: 'error', title: 'Refresh failed — FMP may be rate-limited' });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load, toast]);
 
   const filtered = useMemo(
     () => (typeFilter === 'ALL' ? events : events.filter((e) => e.type === typeFilter)),
@@ -122,21 +139,33 @@ export default function EventCenterPage() {
       subtitle="Upcoming earnings, dividends, and corporate actions across every holding"
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          {TYPE_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setTypeFilter(f.value)}
-              className={cn(
-                'rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-                typeFilter === f.value
-                  ? 'border-brand bg-brand-soft text-brand'
-                  : 'border-border text-ink-secondary hover:bg-surface-2',
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            {TYPE_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setTypeFilter(f.value)}
+                className={cn(
+                  'rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+                  typeFilter === f.value
+                    ? 'border-brand bg-brand-soft text-brand'
+                    : 'border-border text-ink-secondary hover:bg-surface-2',
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            loading={refreshing}
+            onClick={handleRefresh}
+            leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh from FMP'}
+          </Button>
         </div>
 
         <DataTable
