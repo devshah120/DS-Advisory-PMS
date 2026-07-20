@@ -129,6 +129,35 @@ function handleMock(config: any): any | undefined {
   }
 
   // --- Holdings ---
+  // Sample template: without xlsx on the client, mock mode serves a CSV with
+  // the same columns the real .xlsx template uses. It still imports fine.
+  if (url.endsWith('/holdings/import/template') && method === 'get') {
+    const headers = [
+      'clientId', 'ticker', 'quantity', 'averageCost', 'currentPrice',
+      'company', 'sector', 'industry', 'country', 'exchange',
+      'theme', 'targetWeight', 'notes',
+    ];
+    const example = [
+      'client-1', 'AAPL', '100', '150', '175',
+      'Apple Inc.', 'Technology', 'Consumer Electronics', 'United States', 'NASDAQ',
+      '', '5', 'Optional free-text note',
+    ];
+    const csv = `${headers.join(',')}\n${example.join(',')}\n`;
+    return ok(new Blob([csv], { type: 'text/csv' }));
+  }
+
+  // Bulk import: the backend parses the file; mock mode can't (no xlsx on the
+  // client), so it reports that it's mocked rather than pretending to import.
+  if (url.endsWith('/holdings/import') && method === 'post') {
+    return ok({
+      total: 0,
+      imported: 0,
+      failed: 0,
+      results: [],
+      mock: true,
+    });
+  }
+
   if (url.endsWith('/holdings') && method === 'get') {
     return ok(mockHoldings);
   }
