@@ -27,6 +27,24 @@ function pctCell(value: number | null, decimals = 1) {
   return <span className={cn('tabular-nums', value >= 0 ? 'text-success' : 'text-danger')}>{formatSignedPct(value, decimals)}</span>;
 }
 
+/**
+ * A snapshot with no revenue, no margin and no earnings multiple isn't a badly
+ * scoring company — it's a pooled vehicle (country/commodity ETF, index fund)
+ * that has no company fundamentals to score at all. The API prunes these on
+ * refresh, but filtering here too means the table is never showing a row of
+ * zeroes in the window before the next refresh runs.
+ */
+function isScoreable(r: FundamentalView): boolean {
+  const s = r.snapshot;
+  return (
+    s.revenueYoyPercent != null ||
+    s.netMargin != null ||
+    s.roe != null ||
+    s.peRatio != null ||
+    s.revenueCagr3y != null
+  );
+}
+
 export default function FundamentalsPage() {
   const { toast } = useToast();
   const [strategy, setStrategy] = useState('GARP');
@@ -47,7 +65,7 @@ export default function FundamentalsPage() {
     setLoading(true);
     fundamentalsApi
       .list(strategy)
-      .then((data) => mounted && setRows(data))
+      .then((data) => mounted && setRows(data.filter(isScoreable)))
       .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load fundamentals' }))
       .finally(() => mounted && setLoading(false));
     return () => {
@@ -63,10 +81,16 @@ export default function FundamentalsPage() {
       toast({
         tone: result.failed.length === 0 ? 'success' : 'info',
         title: `Refreshed ${result.refreshed} symbol${result.refreshed === 1 ? '' : 's'}`,
-        description: result.failed.length ? `${result.failed.length} failed: ${result.failed.join(', ')}` : undefined,
+        description:
+          [
+            result.failed.length ? `${result.failed.length} failed: ${result.failed.join(', ')}` : null,
+            result.skipped?.length ? `${result.skipped.length} skipped (funds/ETFs)` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ') || undefined,
       });
       const data = await fundamentalsApi.list(strategy);
-      setRows(data);
+      setRows(data.filter(isScoreable));
     } catch {
       toast({ tone: 'error', title: 'Refresh failed' });
     } finally {

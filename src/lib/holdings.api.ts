@@ -28,7 +28,7 @@ export const holdingsApi = {
     const url = URL.createObjectURL(res.data as Blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'holdings-import-template.xlsx';
+    a.download = 'transactions-import-sample.xlsx';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -48,5 +48,14 @@ export const holdingsApi = {
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
     return res.data;
+  },
+
+  /**
+   * Deletes a position outright. This removes the holding row only — any
+   * transactions already recorded against the ticker stay on the ledger, since
+   * they are the record of what actually happened.
+   */
+  async remove(id: string): Promise<void> {
+    await apiClient.getClient().delete(`/holdings/${id}`);
   },
 };

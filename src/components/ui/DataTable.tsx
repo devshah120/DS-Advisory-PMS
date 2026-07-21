@@ -27,6 +27,13 @@ export interface Column<T> {
   sortable?: boolean;
   defaultHidden?: boolean;
   width?: string;
+  /**
+   * Marks a column as chrome rather than data — a row-action button, say.
+   * It is kept out of the column-visibility menu (which lists columns by
+   * header, so an unlabelled one would be a nameless toggle) and out of the
+   * CSV export.
+   */
+  meta?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -175,7 +182,7 @@ export function DataTable<T>({
                   exit={{ opacity: 0, y: -6, scale: 0.97 }}
                   className="absolute right-0 z-40 mt-2 w-52 rounded-[12px] border border-border bg-white p-1.5 shadow-lg"
                 >
-                  {columns.map((c) => {
+                  {columns.filter((c) => !c.meta).map((c) => {
                     const isHidden = hidden.has(c.key);
                     return (
                       <button
@@ -417,11 +424,12 @@ function Checkbox({ checked, onChange }: { checked: boolean; onChange: () => voi
   );
 }
 
-/** Simple CSV export helper. */
+/** Simple CSV export helper. Action columns (`meta`) are left out. */
 export function exportToCsv<T>(filename: string, columns: Column<T>[], rows: T[]) {
-  const headers = columns.map((c) => c.header);
+  const exported = columns.filter((c) => !c.meta);
+  const headers = exported.map((c) => c.header);
   const lines = rows.map((row) =>
-    columns.map((c) => `"${String(c.accessor(row)).replace(/"/g, '""')}"`).join(',')
+    exported.map((c) => `"${String(c.accessor(row)).replace(/"/g, '""')}"`).join(',')
   );
   const csv = [headers.join(','), ...lines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

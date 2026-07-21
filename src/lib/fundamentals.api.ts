@@ -24,8 +24,11 @@ export const fundamentalsApi = {
     return res.data;
   },
 
-  async refresh(): Promise<{ refreshed: number; failed: string[] }> {
-    const res = await apiClient.getClient().post<{ refreshed: number; failed: string[] }>('/fundamentals/refresh');
+  /** `skipped` are symbols with no company behind them (ETFs, funds, dead tickers) — not errors. */
+  async refresh(): Promise<{ refreshed: number; failed: string[]; skipped: string[] }> {
+    const res = await apiClient
+      .getClient()
+      .post<{ refreshed: number; failed: string[]; skipped: string[] }>('/fundamentals/refresh');
     return res.data;
   },
 };

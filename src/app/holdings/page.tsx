@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { holdingsApi, type BulkImportSummary } from '@/lib/holdings.api';
+import { downloadClientHoldingsWorkbook } from '@/lib/holdingsExport';
 import {
   formatCurrency,
   formatCompactCurrency,
@@ -112,6 +113,12 @@ export default function HoldingsPage() {
   const [importResult, setImportResult] = useState<BulkImportSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- delete a position ---
+  // Holds the row awaiting confirmation; deleting is irreversible, so it is
+  // never done straight off the click.
+  const [pendingDelete, setPendingDelete] = useState<ClientPositionRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   async function loadHoldings() {
     try {
       const res = await apiClient.getClient().get('/holdings');
@@ -142,7 +149,7 @@ export default function HoldingsPage() {
   async function handleDownloadTemplate() {
     try {
       await holdingsApi.downloadTemplate();
-      toast({ tone: 'success', title: 'Sample downloaded', description: 'holdings-import-template.xlsx' });
+      toast({ tone: 'success', title: 'Sample downloaded', description: 'transactions-import-sample.xlsx' });
     } catch {
       toast({ tone: 'error', title: 'Could not download the sample file' });
     }
@@ -184,6 +191,28 @@ export default function HoldingsPage() {
       toast({ tone: 'error', title: 'Import failed', description: String(message) });
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await holdingsApi.remove(pendingDelete.id);
+      setPendingDelete(null);
+      await loadHoldings();
+      toast({
+        tone: 'success',
+        title: 'Position deleted',
+        description: `${pendingDelete.symbol} removed from this account.`,
+      });
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message ??
+        (typeof err?.message === 'string' ? err.message : 'Delete failed');
+      toast({ tone: 'error', title: 'Could not delete position', description: String(message) });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -481,6 +510,34 @@ export default function HoldingsPage() {
           </div>
           <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.allocPercent)}</span>
         </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      // Chrome, not data: kept out of the column menu and the CSV export. The
+      // accessor still feeds the free-text search, so it returns nothing —
+      // the symbol is already searchable through its own column.
+      meta: true,
+      accessor: () => '',
+      sortable: false,
+      align: 'center',
+      width: '56px',
+      render: (r) => (
+        <button
+          type="button"
+          aria-label={`Delete ${r.symbol}`}
+          title={`Delete ${r.symbol}`}
+          onClick={(e) => {
+            // The drawer's table has no row click today, but stopping here keeps
+            // the button safe if one is ever added.
+            e.stopPropagation();
+            setPendingDelete(r);
+          }}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-ink-tertiary transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
       ),
     },
   ];
@@ -788,8 +845,15 @@ export default function HoldingsPage() {
               pageSize={20}
               searchPlaceholder="Search symbols or names…"
               onExport={(rows) => {
-                exportToCsv(`${activeClient.clientName}-holdings.csv`, clientPositionColumns, rows);
-                toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+                downloadClientHoldingsWorkbook(activeClient.clientName, rows)
+                  .then(() =>
+                    toast({
+                      tone: 'success',
+                      title: 'Exported',
+                      description: `${rows.length} rows downloaded`,
+                    })
+                  )
+                  .catch(() => toast({ tone: 'error', title: 'Export failed' }));
               }}
               emptyTitle="No positions"
               emptyDescription="This client has no open positions."
@@ -797,6 +861,57 @@ export default function HoldingsPage() {
           </div>
         )}
       </Drawer>
+
+      {/* Delete confirmation */}
+      <Modal
+        isOpen={!!pendingDelete}
+        onClose={() => {
+          if (!deleting) setPendingDelete(null);
+        }}
+        title="Delete this position?"
+        description={
+          pendingDelete
+            ? `${pendingDelete.symbol} — ${pendingDelete.name}`
+            : undefined
+        }
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => setPendingDelete(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              leftIcon={<Trash2 className="h-4 w-4" />}
+              onClick={handleDelete}
+              loading={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Delete position'}
+            </Button>
+          </div>
+        }
+      >
+        {pendingDelete && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <ConfirmField label="Quantity" value={pendingDelete.quantity.toLocaleString()} />
+              <ConfirmField label="Average Cost" value={formatCurrency(pendingDelete.averageCostBasis)} />
+              <ConfirmField label="Current Value" value={formatCurrency(pendingDelete.currentValue)} />
+              <ConfirmField
+                label="Unrealized P&L"
+                value={formatSignedCurrency(pendingDelete.pl)}
+                tone={pendingDelete.pl >= 0 ? 'success' : 'danger'}
+              />
+            </div>
+            <p className="text-xs text-ink-tertiary">
+              This removes the position from
+              {activeClient ? ` ${activeClient.clientName}'s` : ' this'} account and cannot be undone. Any
+              transactions already recorded against {pendingDelete.symbol} stay on the ledger — delete those from
+              the Transactions page if the trade itself was wrong.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* Sector drill-down */}
       <Drawer
@@ -855,8 +970,8 @@ export default function HoldingsPage() {
       <Modal
         isOpen={importOpen}
         onClose={closeImport}
-        title="Bulk Import Holdings"
-        description="Upload an .xlsx or .csv of positions. Each row imports through the same path as a single Add Position — repeated tickers fold into the existing lot at weighted-average cost."
+        title="Bulk Import Transactions"
+        description="Upload an .xlsx or .csv of trades. Each row imports through the same path as a single Add Position — repeated symbols fold into the existing lot at weighted-average cost — and also records a dated buy/sell transaction."
         size="lg"
         footer={
           <div className="flex items-center justify-between gap-3">
@@ -914,9 +1029,9 @@ export default function HoldingsPage() {
           />
 
           <p className="text-xs text-ink-tertiary">
-            Required columns: <span className="font-medium text-ink-secondary">clientId, ticker, quantity, averageCost</span>.
-            Optional: currentPrice, company, sector, industry, country, exchange, theme, targetWeight, notes — anything left
-            blank is resolved automatically from the ticker.
+            Columns: <span className="font-medium text-ink-secondary">Action, Date, Client Name, Symbol, Quantity, Amount Invested</span>.
+            Company, sector, industry, country, exchange, theme, average cost and the live price are all filled in
+            automatically from the symbol — the same details the Add Position screen resolves for you.
           </p>
 
           {/* Result summary */}
@@ -965,6 +1080,30 @@ export default function HoldingsPage() {
         </div>
       </Modal>
     </AppShell>
+  );
+}
+
+function ConfirmField({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success' | 'danger';
+}) {
+  return (
+    <div className="rounded-[10px] border border-border bg-surface-2 px-3 py-2">
+      <p className="text-xs text-ink-secondary">{label}</p>
+      <p
+        className={cn(
+          'tabular-nums text-sm font-semibold',
+          tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : 'text-ink'
+        )}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
 

@@ -32,21 +32,37 @@ export function Modal({
 }) {
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Capture phase + stopPropagation so Escape dismisses only this modal.
+      // A Drawer underneath has its own document-level Escape handler, and
+      // without this a single press would close both layers at once.
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+
+    // Restore whatever the scroll lock was rather than clearing it: when this
+    // modal was opened from inside a Drawer, that Drawer is still open
+    // underneath and still needs the page locked.
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+
     return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      document.removeEventListener('keydown', onKey, true);
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen, onClose]);
 
   if (typeof document === 'undefined') return null;
 
+  // z-[100] sits above the Drawer's z-[95]: a modal is always a response to
+  // something, so a confirmation opened from inside a drawer has to sit on top
+  // of it rather than behind its backdrop.
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <motion.div
             className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"
             initial={{ opacity: 0 }}
