@@ -71,7 +71,7 @@ interface SectorRow {
   marketValue: number;
   pnl: number;
   weight: number;
-}
+} 
 
 /** One position inside a client's drill-down, mirroring the portfolio sheet layout. */
 interface ClientPositionRow {
