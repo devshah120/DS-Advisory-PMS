@@ -89,12 +89,21 @@ interface ClientPositionRow {
   allocPercent: number;
 }
 
+/**
+ * One position inside a sector's drill-down. Same shape as the client
+ * drill-down plus the owning client, since a sector spans many accounts.
+ */
+interface SectorPositionRow extends ClientPositionRow {
+  clientName: string;
+}
+
 export default function HoldingsPage() {
   const { toast } = useToast();
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'symbols' | 'clients' | 'sectors' | 'all'>('symbols');
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
+  const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
 
   // --- bulk import ---
   const [importOpen, setImportOpen] = useState(false);
@@ -295,6 +304,54 @@ export default function HoldingsPage() {
     [clientPositions]
   );
 
+  /** Positions belonging to the sector opened in the drill-down drawer. */
+  const sectorPositions: SectorPositionRow[] = useMemo(() => {
+    if (!activeSector) return [];
+    // Match the same fallback the sector rollup uses, so an unlabelled
+    // position opens under "Uncategorized" instead of vanishing.
+    const inSector = holdings.filter(
+      (h) => (h.sector || 'Uncategorized') === activeSector.sector
+    );
+    const total = inSector.reduce((s, h) => s + h.quantity * h.currentPrice, 0);
+    return inSector
+      .slice()
+      .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
+      .map((h, i) => {
+        const costBasisTotal = h.averageCost * h.quantity;
+        const currentValue = h.quantity * h.currentPrice;
+        const pl = currentValue - costBasisTotal;
+        return {
+          id: h.id,
+          srNo: i + 1,
+          symbol: h.ticker,
+          name: h.company,
+          clientName: h.client?.name ?? 'Unknown',
+          quantity: h.quantity,
+          averageCostBasis: h.averageCost,
+          costBasisTotal,
+          lastPrice: h.currentPrice,
+          currentValue,
+          pl,
+          plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
+          // Weight within the sector, not the whole book.
+          allocPercent: total ? (currentValue / total) * 100 : 0,
+        };
+      });
+  }, [holdings, activeSector]);
+
+  const sectorTotals = useMemo(
+    () =>
+      sectorPositions.reduce(
+        (acc, r) => ({
+          costBasisTotal: acc.costBasisTotal + r.costBasisTotal,
+          currentValue: acc.currentValue + r.currentValue,
+          pl: acc.pl + r.pl,
+        }),
+        { costBasisTotal: 0, currentValue: 0, pl: 0 }
+      ),
+    [sectorPositions]
+  );
+
   // --- column defs ---
   const symbolColumns: Column<SymbolRow>[] = [
     {
@@ -428,6 +485,71 @@ export default function HoldingsPage() {
     },
   ];
 
+  const sectorPositionColumns: Column<SectorPositionRow>[] = [
+    { key: 'srNo', header: 'Sr No', accessor: (r) => r.srNo, align: 'center', width: '64px' },
+    {
+      key: 'symbol',
+      header: 'Symbol',
+      accessor: (r) => r.symbol,
+      render: (r) => <span className="font-semibold text-ink">{r.symbol}</span>,
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      accessor: (r) => r.name,
+      render: (r) => <span className="block max-w-[220px] truncate text-ink-secondary">{r.name}</span>,
+    },
+    {
+      key: 'clientName',
+      header: 'Client',
+      accessor: (r) => r.clientName,
+      render: (r) => <span className="text-ink-secondary">{r.clientName}</span>,
+    },
+    { key: 'quantity', header: 'Quantity', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
+    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis) },
+    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal) },
+    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice) },
+    {
+      key: 'currentValue',
+      header: 'Current Value',
+      accessor: (r) => r.currentValue,
+      align: 'right',
+      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue)}</span>,
+    },
+    {
+      key: 'pl',
+      header: 'PL',
+      accessor: (r) => r.pl,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
+          {formatSignedCurrency(r.pl)}
+        </span>
+      ),
+    },
+    {
+      key: 'plPercent',
+      header: '%PL',
+      accessor: (r) => r.plPercent,
+      align: 'right',
+      render: (r) => <PnlPill pct={r.plPercent} />,
+    },
+    {
+      key: 'allocPercent',
+      header: '%Sector',
+      accessor: (r) => r.allocPercent,
+      align: 'right',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
+            <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(r.allocPercent, 100)}%` }} />
+          </div>
+          <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.allocPercent)}</span>
+        </div>
+      ),
+    },
+  ];
+
   const sectorColumns: Column<SectorRow>[] = [
     {
       key: 'sector',
@@ -438,7 +560,8 @@ export default function HoldingsPage() {
           <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
             <Layers className="h-4 w-4" />
           </span>
-          <span className="font-semibold text-ink">{r.sector}</span>
+          <span className="font-semibold text-ink group-hover:text-brand">{r.sector}</span>
+          <ChevronRight className="h-4 w-4 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       ),
     },
@@ -588,6 +711,7 @@ export default function HoldingsPage() {
             loading={loading}
             rowKey={(r) => r.sector}
             searchPlaceholder="Search sectors…"
+            onRowClick={(r) => setActiveSector(r)}
             onExport={(rows) => {
               exportToCsv('holdings-by-sector.csv', sectorColumns, rows);
               toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
@@ -669,6 +793,59 @@ export default function HoldingsPage() {
               }}
               emptyTitle="No positions"
               emptyDescription="This client has no open positions."
+            />
+          </div>
+        )}
+      </Drawer>
+
+      {/* Sector drill-down */}
+      <Drawer
+        isOpen={!!activeSector}
+        onClose={() => setActiveSector(null)}
+        title={activeSector ? `${activeSector.sector} — Positions` : ''}
+        description={
+          activeSector
+            ? `${sectorPositions.length} position${sectorPositions.length === 1 ? '' : 's'} · ${formatCurrency(
+                sectorTotals.currentValue
+              )} current value · ${formatPct(activeSector.weight)} of book`
+            : ''
+        }
+        width={1180}
+        maximizable
+      >
+        {activeSector && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(sectorTotals.costBasisTotal)} />
+              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(sectorTotals.currentValue)} />
+              <SummaryTile
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Unrealized P&L"
+                value={formatSignedCurrency(sectorTotals.pl)}
+                tone={sectorTotals.pl >= 0 ? 'success' : 'danger'}
+              />
+              <SummaryTile
+                icon={<Layers className="h-4 w-4" />}
+                label="Return"
+                value={formatSignedPct(
+                  sectorTotals.costBasisTotal ? (sectorTotals.pl / sectorTotals.costBasisTotal) * 100 : 0
+                )}
+                tone={sectorTotals.pl >= 0 ? 'success' : 'danger'}
+              />
+            </div>
+
+            <DataTable
+              columns={sectorPositionColumns}
+              data={sectorPositions}
+              rowKey={(r) => r.id}
+              pageSize={20}
+              searchPlaceholder="Search symbols, names or clients…"
+              onExport={(rows) => {
+                exportToCsv(`${activeSector.sector}-positions.csv`, sectorPositionColumns, rows);
+                toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+              }}
+              emptyTitle="No positions"
+              emptyDescription="This sector has no open positions."
             />
           </div>
         )}
