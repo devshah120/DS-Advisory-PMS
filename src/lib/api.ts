@@ -120,6 +120,18 @@ function handleMock(config: any): any | undefined {
     return ok(client, 201);
   }
 
+  if (/\/clients\/[^/]+$/.test(url) && method === 'patch') {
+    const id = url.split('/').pop();
+    const idx = mockClients.findIndex((c) => c.id === id);
+    if (idx < 0) return err(404, `Client ${id} not found`);
+    // Merge the patch onto the stored client and hand the whole record back, the
+    // same shape the real PATCH returns — this is what the Set Cash modal reads
+    // to refresh every cash figure after a balance edit.
+    const updated = { ...mockClients[idx], ...body };
+    mockClients[idx] = updated as any;
+    return ok(updated);
+  }
+
   if (/\/clients\/[^/]+$/.test(url) && method === 'delete') {
     const id = url.split('/').pop();
     const idx = mockClients.findIndex((c) => c.id === id);

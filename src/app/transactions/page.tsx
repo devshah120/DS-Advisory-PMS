@@ -309,7 +309,7 @@ export default function TransactionsPage() {
             leftIcon={<Wallet className="h-4 w-4" />}
             onClick={() => setFlowModalOpen(true)}
           >
-            Cash Flow
+            Set Cash
           </Button>
           <Button
             leftIcon={<Plus className="h-4 w-4" />}
@@ -430,12 +430,14 @@ export default function TransactionsPage() {
         isOpen={flowModalOpen}
         onClose={() => setFlowModalOpen(false)}
         clients={clients}
-        onRecorded={(tx) => {
-          setTxns((prev) => [
-            { ...tx, client: clients.find((c) => c.id === tx.clientId) },
-            ...prev,
-          ]);
-          setView('flows');
+        onSaved={(updated) => {
+          // Cash is a client property, not a transaction — patch the client in
+          // state so the flow-tab's per-client method label and any cash figure
+          // reflect the new balance without a full reload.
+          setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          setTxns((prev) =>
+            prev.map((t) => (t.clientId === updated.id ? { ...t, client: updated } : t))
+          );
         }}
       />
 
