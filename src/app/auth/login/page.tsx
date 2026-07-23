@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -9,6 +10,8 @@ import { Input, Button } from '@/components/ui';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const justReset = searchParams.get('reset') === '1';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -37,6 +40,11 @@ export default function LoginPage() {
       </div>
 
       <form onSubmit={handleLogin} className="space-y-4">
+        {justReset && !error && (
+          <div className="rounded-[10px] border border-success/30 bg-success/10 px-3.5 py-2.5 text-[13px] font-medium text-success">
+            Password reset successfully. Sign in with your new password.
+          </div>
+        )}
         {error && (
           <div className="rounded-[10px] border border-danger/30 bg-danger-soft px-3.5 py-2.5 text-[13px] font-medium text-danger">
             {error}
@@ -77,9 +85,12 @@ export default function LoginPage() {
             <input type="checkbox" className="h-4 w-4 rounded border-border-strong text-brand focus:ring-brand/30" />
             Remember me
           </label>
-          <button type="button" className="text-[13px] font-medium text-brand hover:text-brand-hover">
+          <Link
+            href="/auth/forgot-password"
+            className="text-[13px] font-medium text-brand hover:text-brand-hover"
+          >
             Forgot password?
-          </button>
+          </Link>
         </div>
 
         <Button type="submit" loading={loading} size="lg" className="w-full">
