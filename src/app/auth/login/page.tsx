@@ -48,7 +48,7 @@ export default function LoginPage() {
           label="Email address"
           type="email"
           required
-          placeholder="you@firm.com"
+          placeholder="you@mail.com"
           leftIcon={<Mail className="h-4 w-4" />}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
