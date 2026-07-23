@@ -41,11 +41,12 @@ function EditClientPageInner() {
           accountNumber: client.accountNumber,
           benchmark: client.benchmark,
           riskProfile: client.riskProfile,
-          accountingMethod: client.accountingMethod,
           feeRatePercent: String(client.feeRatePercent),
           // API returns a full ISO datetime; the date input wants YYYY-MM-DD.
           inceptionDate: String(client.inceptionDate).slice(0, 10),
           currency: client.currency,
+          // Prefill the maintained cash so editing doesn't wipe it; 0 shows as blank.
+          cashBalance: client.cashBalance ? String(client.cashBalance) : '',
           notes: client.notes ?? '',
         });
       } catch {
@@ -86,7 +87,6 @@ function EditClientPageInner() {
           <ClientForm
             mode="edit"
             initial={initial}
-            lockAccountingMethod
             onCancel={() => router.back()}
             onSubmit={async (payload) => {
               const updated = await clientsApi.update(id, payload);

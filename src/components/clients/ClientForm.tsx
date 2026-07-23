@@ -7,14 +7,12 @@ import {
   Hash,
   Target,
   Check,
-  ArrowLeftRight,
   Wallet,
   Percent,
   CalendarDays,
 } from 'lucide-react';
 import { CreateClientInput, parseApiError } from '@/lib/clients.api';
-import { AccountingMethod, RiskProfile } from '@/types';
-import { cn } from '@/lib/utils';
+import { RiskProfile } from '@/types';
 import { Card, CardHeader, Input, Select, Textarea, Button, Badge, useToast } from '@/components/ui';
 
 export interface ClientFormValues {
@@ -23,10 +21,11 @@ export interface ClientFormValues {
   accountNumber: string;
   benchmark: string;
   riskProfile: RiskProfile;
-  accountingMethod: AccountingMethod | null;
   feeRatePercent: string;
   inceptionDate: string;
   currency: string;
+  /** Manually maintained buying-power balance. Blank means "none entered". */
+  cashBalance: string;
   notes: string;
 }
 
@@ -36,48 +35,18 @@ export const emptyClientForm: ClientFormValues = {
   accountNumber: '',
   benchmark: '',
   riskProfile: 'moderate',
-  // Null, not a default. This decides how the client's return is measured for the
-  // life of the mandate, and a pre-ticked box is how the wrong one gets chosen.
-  accountingMethod: null,
   feeRatePercent: '',
   inceptionDate: '',
   currency: 'USD',
+  cashBalance: '',
   notes: '',
 };
-
-const METHODS: Array<{
-  value: AccountingMethod;
-  icon: typeof ArrowLeftRight;
-  title: string;
-  tagline: string;
-  detail: string;
-}> = [
-  {
-    value: 'transactional',
-    icon: ArrowLeftRight,
-    title: 'Transaction based',
-    tagline: 'XIRR from trades',
-    detail:
-      'Every buy counts as money in and every sell as money out. Use this when you see the trades but the client never tells you what they funded. Return is measured on capital deployed into positions.',
-  },
-  {
-    value: 'cash_flow',
-    icon: Wallet,
-    title: 'Cash flow based',
-    tagline: 'XIRR from client funding',
-    detail:
-      'You record the inflows and outflows the client actually gives you. Trades are internal moves and do not count as flows. Return is measured on the money the client handed over.',
-  },
-];
 
 export interface ClientFormProps {
   mode: 'create' | 'edit';
   initial: ClientFormValues;
   onSubmit: (payload: CreateClientInput) => Promise<void>;
   onCancel: () => void;
-  /** Locks the accounting-method picker: changing it retroactively on a client with
-   *  existing history would silently change the meaning of every past transaction. */
-  lockAccountingMethod?: boolean;
 }
 
 export default function ClientForm({
@@ -85,7 +54,6 @@ export default function ClientForm({
   initial,
   onSubmit,
   onCancel,
-  lockAccountingMethod,
 }: ClientFormProps) {
   const { toast } = useToast();
   const [form, setForm] = useState<ClientFormValues>(initial);
@@ -105,12 +73,13 @@ export default function ClientForm({
     else if (form.accountNumber.trim().length < 4)
       e.accountNumber = 'Account number looks too short';
     if (!form.benchmark.trim()) e.benchmark = 'Benchmark is required';
-    if (!form.accountingMethod)
-      e.accountingMethod = 'Choose how this client’s return should be calculated';
     if (form.feeRatePercent.trim() === '') e.feeRatePercent = 'Enter the annual fee rate (0 if none)';
     else if (Number(form.feeRatePercent) < 0 || Number(form.feeRatePercent) > 100)
       e.feeRatePercent = 'Fee rate must be between 0 and 100';
     if (!form.inceptionDate) e.inceptionDate = 'Inception date is required';
+    // Cash is optional, but if entered it must be a non-negative number.
+    if (form.cashBalance.trim() !== '' && (Number.isNaN(Number(form.cashBalance)) || Number(form.cashBalance) < 0))
+      e.cashBalance = 'Cash balance must be a number of 0 or more';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -129,10 +98,14 @@ export default function ClientForm({
       accountNumber: form.accountNumber.trim(),
       benchmark: form.benchmark.trim(),
       riskProfile: form.riskProfile,
-      accountingMethod: form.accountingMethod!, // validate() guarantees this is set
+      // The cash-flow method has been retired — every client is transactional.
+      accountingMethod: 'transactional',
       feeRatePercent: Number(form.feeRatePercent),
       inceptionDate: form.inceptionDate,
       currency: form.currency,
+      // Only send cash when the manager actually entered a figure, so leaving it
+      // blank doesn't overwrite an existing balance with 0.
+      ...(form.cashBalance.trim() !== '' ? { cashBalance: Number(form.cashBalance) } : {}),
       ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
     };
 
@@ -196,76 +169,6 @@ export default function ClientForm({
       </Card>
 
       <Card>
-        <CardHeader
-          title="Return Methodology"
-          subtitle={
-            lockAccountingMethod
-              ? 'How this client’s XIRR is calculated. Locked after onboarding — changing it would silently rewrite the meaning of every past transaction.'
-              : 'How this client’s XIRR is calculated. This cannot be guessed — pick the one that matches the records you actually receive.'
-          }
-        />
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-          {METHODS.map((m) => {
-            const selected = form.accountingMethod === m.value;
-            const Icon = m.icon;
-            const disabled = !!lockAccountingMethod && !selected;
-            return (
-              <button
-                key={m.value}
-                type="button"
-                disabled={disabled}
-                onClick={() => !lockAccountingMethod && set('accountingMethod', m.value)}
-                aria-pressed={selected}
-                className={cn(
-                  'group relative rounded-[14px] border p-5 text-left transition-all',
-                  selected
-                    ? 'border-brand bg-brand/[0.04] ring-1 ring-brand'
-                    : 'border-border bg-white hover:border-ink-tertiary hover:bg-surface-2',
-                  disabled && 'cursor-not-allowed opacity-50 hover:border-border hover:bg-white'
-                )}
-              >
-                {selected && (
-                  <span className="absolute right-4 top-4 flex h-5 w-5 items-center justify-center rounded-full bg-brand text-white">
-                    <Check className="h-3 w-3" strokeWidth={3} />
-                  </span>
-                )}
-
-                <span
-                  className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-[10px] transition-colors',
-                    selected ? 'bg-brand text-white' : 'bg-surface-3 text-ink-secondary'
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                </span>
-
-                <p className="mt-3 text-[15px] font-semibold text-ink">{m.title}</p>
-                <p className="mt-0.5 text-xs font-medium text-brand">{m.tagline}</p>
-                <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">
-                  {m.detail}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-
-        {errors.accountingMethod && (
-          <p className="mt-3 text-[13px] font-medium text-danger">
-            {errors.accountingMethod}
-          </p>
-        )}
-
-        {form.accountingMethod === 'cash_flow' && (
-          <p className="mt-4 rounded-[10px] bg-surface-2 px-4 py-3 text-[13px] text-ink-secondary">
-            You’ll record this client’s inflows and outflows on the{' '}
-            <span className="font-semibold text-ink">Cash Flows</span> tab of the
-            Transactions page. Until at least one inflow is recorded, their XIRR will
-            show as unavailable.
-          </p>
-        )}
-      </Card>
-
-      <Card>
         <CardHeader title="Mandate Profile" subtitle="Risk appetite and reporting currency" />
         <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
           <Select
@@ -312,6 +215,18 @@ export default function ClientForm({
             onChange={(e) => set('inceptionDate', e.target.value)}
             error={errors.inceptionDate}
             helper="The mandate's actual start date, for prorating the first billing quarter"
+          />
+          <Input
+            label="Cash Balance"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="0.00"
+            leftIcon={<Wallet className="h-4 w-4" />}
+            value={form.cashBalance}
+            onChange={(e) => set('cashBalance', e.target.value)}
+            error={errors.cashBalance}
+            helper="Uninvested cash you're holding for this client. Counts toward Portfolio Value; excluded from XIRR (idle cash isn't deployed capital)."
           />
         </div>
         <div className="mt-5">
