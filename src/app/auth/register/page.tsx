@@ -70,7 +70,7 @@ export default function RegisterPage() {
           label="Work email"
           type="email"
           required
-          placeholder="you@firm.com"
+          placeholder="you@mail.com"
           leftIcon={<Mail className="h-4 w-4" />}
           value={form.email}
           onChange={(e) => set('email', e.target.value)}
