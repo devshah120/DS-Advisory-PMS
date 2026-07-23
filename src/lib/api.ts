@@ -8,7 +8,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/a
 // NEXT_PUBLIC_USE_MOCK="false" to talk to the real API instead.
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== 'false';
 
-const FAKE_TOKEN = 'mock-access-token';
 const genId = () => 'mock-' + Math.random().toString(36).slice(2, 10);
 
 // Resolves an axios-style request from in-memory mock data. Returns a value
@@ -55,20 +54,9 @@ function handleMock(config: any): any | undefined {
   };
 
   // --- Auth ---
-  if (url.endsWith('/auth/login') || url.endsWith('/auth/register')) {
-    return ok({
-      accessToken: FAKE_TOKEN,
-      refreshToken: FAKE_TOKEN,
-      expiresIn: 3600,
-      user: {
-        id: 'mock-user',
-        email: body.email || 'dev@local.com',
-        firstName: body.firstName || 'Dev',
-        lastName: body.lastName || 'User',
-        role: 'portfolio_manager',
-      },
-    });
-  }
+  // Authentication always hits the real backend so credentials are validated
+  // against the database and a real JWT is issued — never a fake token, even
+  // when the rest of the app runs on mock data.
 
   // --- Dashboard ---
   // Overview and market-overview both need live market data (holdings P&L,
