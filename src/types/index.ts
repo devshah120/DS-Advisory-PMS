@@ -306,6 +306,8 @@ export interface HoldingMover {
 
 export interface DashboardOverview {
   totalAUM: number;
+  /** House-wide idle cash across every client — deployable buying power, not deployed capital. */
+  totalCash: number;
   numClients: number;
   numHoldings: number;
   topGainers: HoldingMover[];

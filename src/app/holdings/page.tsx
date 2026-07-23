@@ -6,6 +6,7 @@ import {
   TrendingUp,
   Layers,
   Wallet,
+  PiggyBank,
   Trash2,
   Tag,
   ChevronRight,
@@ -64,6 +65,10 @@ interface ClientRow {
   marketValue: number;
   pnl: number;
   portfolioValue: number;
+  /** Idle cash the client holds — buying power for deployment, not deployed capital. */
+  cashBalance: number;
+  /** Cash as a share of (holdings + cash). What's undeployed right now. */
+  cashWeight: number;
 }
 
 interface SectorRow {
@@ -263,18 +268,36 @@ export default function HoldingsPage() {
           holdings: 0,
           marketValue: 0,
           pnl: 0,
-          portfolioValue: h.client?.portfolioValue ?? 0,
+          // Cash is a property of the client, not the position — read once off the
+          // joined record. Portfolio value is derived live (holdings + cash) rather
+          // than read from the stale stored column, which is known to drift to $0.
+          portfolioValue: 0,
+          cashBalance: h.client?.cashBalance ?? 0,
+          cashWeight: 0,
         };
       cur.holdings += 1;
       cur.marketValue += h.marketValue;
       cur.pnl += h.unrealizedPnL;
       map.set(h.clientId, cur);
     });
-    return [...map.values()].sort((a, b) => b.marketValue - a.marketValue);
+    // Finalize the derived columns once every position has been summed.
+    return [...map.values()]
+      .map((c) => {
+        const portfolioValue = c.marketValue + c.cashBalance;
+        return {
+          ...c,
+          portfolioValue,
+          cashWeight: portfolioValue > 0 ? (c.cashBalance / portfolioValue) * 100 : 0,
+        };
+      })
+      .sort((a, b) => b.marketValue - a.marketValue);
   }, [holdings]);
 
   const totalMv = holdings.reduce((s, h) => s + h.marketValue, 0);
   const totalPnl = holdings.reduce((s, h) => s + h.unrealizedPnL, 0);
+  // House-wide idle cash, summed per client (never per position, or a client's
+  // balance would be counted once for every holding they own).
+  const totalCash = clientRows.reduce((s, c) => s + c.cashBalance, 0);
 
   const sectorRows: SectorRow[] = useMemo(() => {
     const total = holdings.reduce((s, h) => s + h.marketValue, 0);
@@ -505,6 +528,31 @@ export default function HoldingsPage() {
     },
     { key: 'holdings', header: 'Holdings', accessor: (r) => r.holdings, align: 'center' },
     { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue)}</span> },
+    {
+      key: 'cashBalance',
+      header: 'Cash',
+      accessor: (r) => r.cashBalance,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('tabular-nums', r.cashBalance > 0 ? 'text-ink' : 'text-ink-tertiary')}>
+          {formatCurrency(r.cashBalance)}
+        </span>
+      ),
+    },
+    {
+      key: 'cashWeight',
+      header: 'Cash %',
+      accessor: (r) => r.cashWeight,
+      align: 'right',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
+            <div className="h-full rounded-full bg-warning" style={{ width: `${Math.min(r.cashWeight, 100)}%` }} />
+          </div>
+          <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.cashWeight)}</span>
+        </div>
+      ),
+    },
     { key: 'portfolioValue', header: 'Portfolio Value', accessor: (r) => r.portfolioValue, align: 'right', render: (r) => formatCurrency(r.portfolioValue) },
     {
       key: 'pnl',
@@ -827,8 +875,14 @@ export default function HoldingsPage() {
     >
       <div className="space-y-6">
         {/* Summary */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Total Market Value" value={formatCompactCurrency(totalMv)} />
+          <SummaryTile
+            icon={<PiggyBank className="h-4 w-4" />}
+            label="Deployable Cash"
+            value={formatCompactCurrency(totalCash)}
+            hint={totalMv + totalCash > 0 ? `${formatPct((totalCash / (totalMv + totalCash)) * 100)} of assets` : undefined}
+          />
           <SummaryTile
             icon={<TrendingUp className="h-4 w-4" />}
             label="Unrealized P&L"
@@ -936,7 +990,9 @@ export default function HoldingsPage() {
           activeClient
             ? `${clientPositions.length} position${clientPositions.length === 1 ? '' : 's'} · ${formatCurrency(
                 clientTotals.currentValue
-              )} current value`
+              )} invested · ${formatCurrency(activeClient.cashBalance)} cash (${formatPct(
+                activeClient.cashWeight
+              )} of portfolio)`
             : ''
         }
         width={1180}
@@ -944,9 +1000,15 @@ export default function HoldingsPage() {
       >
         {activeClient && (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
               <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(clientTotals.costBasisTotal)} />
               <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(clientTotals.currentValue)} />
+              <SummaryTile
+                icon={<PiggyBank className="h-4 w-4" />}
+                label="Cash Available"
+                value={formatCurrency(activeClient.cashBalance)}
+                hint={`${formatPct(activeClient.cashWeight)} of portfolio · deploy or hold`}
+              />
               <SummaryTile
                 icon={<TrendingUp className="h-4 w-4" />}
                 label="Unrealized P&L"
@@ -1314,11 +1376,14 @@ function SummaryTile({
   label,
   value,
   tone,
+  hint,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
   tone?: 'success' | 'danger';
+  /** Optional secondary line, e.g. a share-of-assets figure under the value. */
+  hint?: string;
 }) {
   return (
     <Card padding="md" hover>
@@ -1336,6 +1401,7 @@ function SummaryTile({
           >
             {value}
           </p>
+          {hint && <p className="text-2xs text-ink-tertiary">{hint}</p>}
         </div>
       </div>
     </Card>

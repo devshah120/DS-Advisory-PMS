@@ -121,6 +121,25 @@ export default function ClientsPage() {
       render: (r) => formatCurrency(r.cashBalance),
     },
     {
+      key: 'cashWeight',
+      header: 'Cash %',
+      // Share of the portfolio sitting in cash — how much buying power is idle and
+      // available to deploy. portfolioValue is derived (holdings + cash) server-side.
+      accessor: (r) => (r.portfolioValue > 0 ? (r.cashBalance / r.portfolioValue) * 100 : 0),
+      align: 'right',
+      render: (r) => {
+        const pct = r.portfolioValue > 0 ? (r.cashBalance / r.portfolioValue) * 100 : 0;
+        return (
+          <div className="flex items-center justify-end gap-2">
+            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-surface-3">
+              <div className="h-full rounded-full bg-warning" style={{ width: `${Math.min(pct, 100)}%` }} />
+            </div>
+            <span className="w-11 text-right tabular-nums text-ink-secondary">{`${pct.toFixed(1)}%`}</span>
+          </div>
+        );
+      },
+    },
+    {
       key: 'xirr',
       header: 'XIRR',
       accessor: (r) => r.xirr,

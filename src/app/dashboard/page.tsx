@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Landmark, Users, TrendingUp, TrendingDown, Briefcase } from 'lucide-react';
+import { Landmark, Users, TrendingUp, TrendingDown, Briefcase, PiggyBank } from 'lucide-react';
 import { dashboardApi } from '@/lib/dashboard.api';
 import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/lib/utils';
 import { DashboardOverview, MarketQuote, HoldingMover } from '@/types';
@@ -49,9 +49,10 @@ export default function DashboardPage() {
     <AppShell title="Portfolio Overview" subtitle="Consolidated performance across all managed accounts">
       <div className="space-y-6">
         {/* ---- KPI row ---- */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {overviewLoading || !overview ? (
             <>
+              <KpiSkeleton />
               <KpiSkeleton />
               <KpiSkeleton />
               <KpiSkeleton />
@@ -68,6 +69,19 @@ export default function DashboardPage() {
               />
               <StatCard
                 index={1}
+                label="Deployable Cash"
+                value={overview.totalCash}
+                format={(n) => formatCompactCurrency(n)}
+                icon={<PiggyBank className="h-4 w-4" />}
+                accent="neutral"
+                sublabel={
+                  overview.totalAUM + overview.totalCash > 0
+                    ? `${((overview.totalCash / (overview.totalAUM + overview.totalCash)) * 100).toFixed(1)}% of assets`
+                    : undefined
+                }
+              />
+              <StatCard
+                index={2}
                 label="Total Clients"
                 value={overview.numClients}
                 format={(n) => String(n)}
@@ -75,7 +89,7 @@ export default function DashboardPage() {
                 accent="neutral"
               />
               <StatCard
-                index={2}
+                index={3}
                 label="Holdings"
                 value={overview.numHoldings}
                 format={(n) => String(n)}
