@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
@@ -8,7 +8,9 @@ import { apiClient } from '@/lib/api';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Input, Button } from '@/components/ui';
 
-export default function LoginPage() {
+// useSearchParams() forces this subtree to render on the client, so it must sit
+// inside a Suspense boundary or the production build fails prerendering.
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const justReset = searchParams.get('reset') === '1';
@@ -98,5 +100,13 @@ export default function LoginPage() {
         </Button>
       </form>
     </AuthLayout>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<AuthLayout><div /></AuthLayout>}>
+      <LoginForm />
+    </Suspense>
   );
 }
