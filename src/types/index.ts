@@ -37,6 +37,8 @@ export interface Client {
   name: string;
   broker: string;
   accountNumber: string;
+  /** Optional contact email for the mandate. */
+  email?: string;
   benchmark: string;
   riskProfile: RiskProfile;
   accountingMethod: AccountingMethod;

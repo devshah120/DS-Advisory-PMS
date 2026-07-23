@@ -5,6 +5,7 @@ import {
   Building2,
   User,
   Hash,
+  Mail,
   Target,
   Check,
   Wallet,
@@ -19,6 +20,7 @@ export interface ClientFormValues {
   name: string;
   broker: string;
   accountNumber: string;
+  email: string;
   benchmark: string;
   riskProfile: RiskProfile;
   feeRatePercent: string;
@@ -33,6 +35,7 @@ export const emptyClientForm: ClientFormValues = {
   name: '',
   broker: '',
   accountNumber: '',
+  email: '',
   benchmark: '',
   riskProfile: 'moderate',
   feeRatePercent: '',
@@ -72,6 +75,9 @@ export default function ClientForm({
     if (!form.accountNumber.trim()) e.accountNumber = 'Account number is required';
     else if (form.accountNumber.trim().length < 4)
       e.accountNumber = 'Account number looks too short';
+    // Email is optional, but if entered it must look like an email.
+    if (form.email.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
+      e.email = 'Enter a valid email address';
     if (!form.benchmark.trim()) e.benchmark = 'Benchmark is required';
     if (form.feeRatePercent.trim() === '') e.feeRatePercent = 'Enter the annual fee rate (0 if none)';
     else if (Number(form.feeRatePercent) < 0 || Number(form.feeRatePercent) > 100)
@@ -97,6 +103,8 @@ export default function ClientForm({
       broker: form.broker.trim(),
       accountNumber: form.accountNumber.trim(),
       benchmark: form.benchmark.trim(),
+      // Only send email when entered — the API rejects an empty string.
+      ...(form.email.trim() ? { email: form.email.trim() } : {}),
       riskProfile: form.riskProfile,
       // The cash-flow method has been retired — every client is transactional.
       accountingMethod: 'transactional',
@@ -154,6 +162,16 @@ export default function ClientForm({
             value={form.accountNumber}
             onChange={(e) => set('accountNumber', e.target.value)}
             error={errors.accountNumber}
+          />
+          <Input
+            label="Email"
+            type="email"
+            placeholder="contact@evergreen.com"
+            leftIcon={<Mail className="h-4 w-4" />}
+            value={form.email}
+            onChange={(e) => set('email', e.target.value)}
+            error={errors.email}
+            helper="Optional contact email for this mandate"
           />
           <Input
             label="Benchmark"

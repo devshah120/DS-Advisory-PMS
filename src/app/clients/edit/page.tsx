@@ -39,6 +39,7 @@ function EditClientPageInner() {
           name: client.name,
           broker: client.broker,
           accountNumber: client.accountNumber,
+          email: client.email ?? '',
           benchmark: client.benchmark,
           riskProfile: client.riskProfile,
           feeRatePercent: String(client.feeRatePercent),

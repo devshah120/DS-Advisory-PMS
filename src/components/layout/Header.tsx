@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -19,7 +19,9 @@ import {
   LogOut,
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { clientsApi } from '@/lib/clients.api';
 import { cn } from '@/lib/utils';
+import type { Client } from '@/types';
 
 interface HeaderProps {
   onOpenCommand: () => void;
@@ -35,8 +37,6 @@ const crumbLabels: Record<string, string> = {
   auth: 'Account',
 };
 
-const workspaces = ['Atlas Global Fund', 'Hudson Family Office', 'Maple Trust'];
-
 const notifications = [
   { icon: TrendingUp, tone: 'text-success', title: 'NVDA up 4.2% today', time: '12m ago' },
   { icon: CircleDollarSign, tone: 'text-brand', title: 'Dividend credited — $3,200', time: '1h ago' },
@@ -46,8 +46,29 @@ const notifications = [
 export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [workspace, setWorkspace] = useState(workspaces[0]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    clientsApi
+      .list({ limit: 100 })
+      .then((list) => {
+        if (!active) return;
+        setClients(list);
+        setWorkspaceId((prev) => prev ?? list[0]?.id ?? null);
+      })
+      .catch(() => {
+        /* leave the switcher empty if clients can't be loaded */
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const workspace = clients.find((c) => c.id === workspaceId) ?? null;
+  const workspaceName = workspace?.name ?? 'Select client';
 
   const segments = pathname.split('/').filter(Boolean);
 
@@ -93,17 +114,17 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
       {/* Workspace selector */}
       <Dropdown
         width={240}
-        items={workspaces.map((w) => ({
-          label: w,
-          icon: w === workspace ? <Check className="h-4 w-4 text-brand" /> : <span className="h-4 w-4" />,
-          onClick: () => setWorkspace(w),
+        items={clients.map((c) => ({
+          label: c.name,
+          icon: c.id === workspaceId ? <Check className="h-4 w-4 text-brand" /> : <span className="h-4 w-4" />,
+          onClick: () => setWorkspaceId(c.id),
         }))}
         trigger={
           <button className="hidden h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2 lg:flex">
             <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-brand to-brand-active text-2xs font-bold text-white">
-              {workspace.charAt(0)}
+              {workspaceName.charAt(0)}
             </span>
-            <span className="max-w-[140px] truncate">{workspace}</span>
+            <span className="max-w-[140px] truncate">{workspaceName}</span>
             <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
           </button>
         }

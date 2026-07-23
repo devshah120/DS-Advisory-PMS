@@ -12,6 +12,8 @@ export interface CreateClientInput {
   name: string;
   broker: string;
   accountNumber: string;
+  /** Optional contact email. Omit when blank — the API rejects "". */
+  email?: string;
   benchmark: string;
   riskProfile: RiskProfile;
   /** Required: decides how this client's XIRR is computed. No safe default. */

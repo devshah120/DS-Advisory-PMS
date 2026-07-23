@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -87,13 +86,6 @@ export default function LoginPage() {
           Sign in
         </Button>
       </form>
-
-      <p className="mt-6 text-center text-[13px] text-ink-secondary">
-        New to DS Advisory?{' '}
-        <Link href="/auth/register" className="font-semibold text-brand hover:text-brand-hover">
-          Create an account
-        </Link>
-      </p>
     </AuthLayout>
   );
 }

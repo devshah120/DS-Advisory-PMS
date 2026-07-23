@@ -1,47 +1,24 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-
 /**
- * Counts a numeric value up on mount / when the target changes, then formats it.
+ * Renders a numeric value with the given formatter.
+ *
+ * (Previously this counted the value up on mount. The count-up tween was
+ * removed because it leaked interpolation artifacts on integer stats — e.g.
+ * "Total Clients" showing 7.999932746370387 — and made these cards behave
+ * differently from every other card. The card's fade/slide-in still handles
+ * the entrance animation.)
  */
 export function AnimatedNumber({
   value,
   format,
-  duration = 900,
   className,
 }: {
   value: number;
   format: (n: number) => string;
+  /** Accepted for backwards compatibility; no longer used. */
   duration?: number;
   className?: string;
 }) {
-  const [display, setDisplay] = useState(0);
-  const fromRef = useRef(0);
-  const rafRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    const from = fromRef.current;
-    const start = performance.now();
-    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
-
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const current = from + (value - from) * easeOut(t);
-      setDisplay(current);
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        fromRef.current = value;
-      }
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, duration]);
-
-  return <span className={className}>{format(display)}</span>;
+  return <span className={className}>{format(value)}</span>;
 }
