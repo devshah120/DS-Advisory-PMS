@@ -98,6 +98,16 @@ interface SectorPositionRow extends ClientPositionRow {
   clientName: string;
 }
 
+/**
+ * One client's holding of a single symbol, shown in the symbol drill-down.
+ * %Alloc here is the weight of this lot inside that client's own portfolio,
+ * not inside the symbol aggregate — so an advisor can see how large a bet
+ * each account has placed on the name.
+ */
+interface SymbolHolderRow extends ClientPositionRow {
+  clientName: string;
+}
+
 export default function HoldingsPage() {
   const { toast } = useToast();
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
@@ -105,6 +115,7 @@ export default function HoldingsPage() {
   const [view, setView] = useState<'symbols' | 'clients' | 'sectors' | 'all'>('symbols');
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
   const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
+  const [activeSymbol, setActiveSymbol] = useState<SymbolRow | null>(null);
 
   // --- bulk import ---
   const [importOpen, setImportOpen] = useState(false);
@@ -381,6 +392,58 @@ export default function HoldingsPage() {
     [sectorPositions]
   );
 
+  /** Clients holding the symbol opened in the drill-down drawer. */
+  const symbolHolders: SymbolHolderRow[] = useMemo(() => {
+    if (!activeSymbol) return [];
+    const owners = holdings.filter((h) => h.ticker === activeSymbol.symbol);
+    // Per-client portfolio totals, computed once, so each lot's %Alloc reflects
+    // its weight inside that client's own book rather than the symbol aggregate.
+    const clientTotal = new Map<string, number>();
+    holdings.forEach((h) => {
+      clientTotal.set(
+        h.clientId,
+        (clientTotal.get(h.clientId) ?? 0) + h.quantity * h.currentPrice
+      );
+    });
+    return owners
+      .slice()
+      .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
+      .map((h, i) => {
+        const costBasisTotal = h.averageCost * h.quantity;
+        const currentValue = h.quantity * h.currentPrice;
+        const pl = currentValue - costBasisTotal;
+        const portfolioValue = clientTotal.get(h.clientId) ?? 0;
+        return {
+          id: h.id,
+          srNo: i + 1,
+          symbol: h.ticker,
+          name: h.company,
+          clientName: h.client?.name ?? 'Unknown',
+          quantity: h.quantity,
+          averageCostBasis: h.averageCost,
+          costBasisTotal,
+          lastPrice: h.currentPrice,
+          currentValue,
+          pl,
+          plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
+          allocPercent: portfolioValue ? (currentValue / portfolioValue) * 100 : 0,
+        };
+      });
+  }, [holdings, activeSymbol]);
+
+  const symbolTotals = useMemo(
+    () =>
+      symbolHolders.reduce(
+        (acc, r) => ({
+          costBasisTotal: acc.costBasisTotal + r.costBasisTotal,
+          currentValue: acc.currentValue + r.currentValue,
+          pl: acc.pl + r.pl,
+        }),
+        { costBasisTotal: 0, currentValue: 0, pl: 0 }
+      ),
+    [symbolHolders]
+  );
+
   // --- column defs ---
   const symbolColumns: Column<SymbolRow>[] = [
     {
@@ -393,9 +456,10 @@ export default function HoldingsPage() {
             {r.symbol.slice(0, 4)}
           </span>
           <div>
-            <p className="font-semibold text-ink">{r.symbol}</p>
+            <p className="font-semibold text-ink group-hover:text-brand">{r.symbol}</p>
             <p className="max-w-[180px] truncate text-xs text-ink-tertiary">{r.company}</p>
           </div>
+          <ChevronRight className="h-4 w-4 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       ),
     },
@@ -607,6 +671,66 @@ export default function HoldingsPage() {
     },
   ];
 
+  const symbolHolderColumns: Column<SymbolHolderRow>[] = [
+    { key: 'srNo', header: 'Sr No', accessor: (r) => r.srNo, align: 'center', width: '64px' },
+    {
+      key: 'clientName',
+      header: 'Client',
+      accessor: (r) => r.clientName,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-active text-2xs font-semibold text-white">
+            {r.clientName.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="font-semibold text-ink">{r.clientName}</span>
+        </div>
+      ),
+    },
+    { key: 'quantity', header: 'Quantity', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
+    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis) },
+    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal) },
+    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice) },
+    {
+      key: 'currentValue',
+      header: 'Current Value',
+      accessor: (r) => r.currentValue,
+      align: 'right',
+      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue)}</span>,
+    },
+    {
+      key: 'pl',
+      header: 'PL',
+      accessor: (r) => r.pl,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
+          {formatSignedCurrency(r.pl)}
+        </span>
+      ),
+    },
+    {
+      key: 'plPercent',
+      header: '%PL',
+      accessor: (r) => r.plPercent,
+      align: 'right',
+      render: (r) => <PnlPill pct={r.plPercent} />,
+    },
+    {
+      key: 'allocPercent',
+      header: '%Portfolio',
+      accessor: (r) => r.allocPercent,
+      align: 'right',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
+            <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(r.allocPercent, 100)}%` }} />
+          </div>
+          <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.allocPercent)}</span>
+        </div>
+      ),
+    },
+  ];
+
   const sectorColumns: Column<SectorRow>[] = [
     {
       key: 'sector',
@@ -737,6 +861,7 @@ export default function HoldingsPage() {
             loading={loading}
             rowKey={(r) => r.symbol}
             searchPlaceholder="Search symbols or companies…"
+            onRowClick={(r) => setActiveSymbol(r)}
             onExport={(rows) => {
               exportToCsv('holdings-by-symbol.csv', symbolColumns, rows);
               toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
@@ -961,6 +1086,59 @@ export default function HoldingsPage() {
               }}
               emptyTitle="No positions"
               emptyDescription="This sector has no open positions."
+            />
+          </div>
+        )}
+      </Drawer>
+
+      {/* Symbol drill-down — which clients hold this name, and at what weight */}
+      <Drawer
+        isOpen={!!activeSymbol}
+        onClose={() => setActiveSymbol(null)}
+        title={activeSymbol ? `${activeSymbol.symbol} — Holders` : ''}
+        description={
+          activeSymbol
+            ? `${activeSymbol.company} · ${symbolHolders.length} client${
+                symbolHolders.length === 1 ? '' : 's'
+              } · ${formatCurrency(symbolTotals.currentValue)} current value`
+            : ''
+        }
+        width={1180}
+        maximizable
+      >
+        {activeSymbol && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(symbolTotals.costBasisTotal)} />
+              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(symbolTotals.currentValue)} />
+              <SummaryTile
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Unrealized P&L"
+                value={formatSignedCurrency(symbolTotals.pl)}
+                tone={symbolTotals.pl >= 0 ? 'success' : 'danger'}
+              />
+              <SummaryTile
+                icon={<Layers className="h-4 w-4" />}
+                label="Return"
+                value={formatSignedPct(
+                  symbolTotals.costBasisTotal ? (symbolTotals.pl / symbolTotals.costBasisTotal) * 100 : 0
+                )}
+                tone={symbolTotals.pl >= 0 ? 'success' : 'danger'}
+              />
+            </div>
+
+            <DataTable
+              columns={symbolHolderColumns}
+              data={symbolHolders}
+              rowKey={(r) => r.id}
+              pageSize={20}
+              searchPlaceholder="Search clients…"
+              onExport={(rows) => {
+                exportToCsv(`${activeSymbol.symbol}-holders.csv`, symbolHolderColumns, rows);
+                toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+              }}
+              emptyTitle="No holders"
+              emptyDescription="No client holds this symbol."
             />
           </div>
         )}
