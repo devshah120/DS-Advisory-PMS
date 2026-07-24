@@ -14,6 +14,12 @@ export interface CreateClientInput {
   accountNumber: string;
   /** Optional contact email. Omit when blank — the API rejects "". */
   email?: string;
+  /**
+   * Login password for the client's own account. Required on create; on edit,
+   * omit to leave the existing password unchanged (the API treats absent/blank
+   * as "no change").
+   */
+  password?: string;
   benchmark: string;
   riskProfile: RiskProfile;
   /** Required: decides how this client's XIRR is computed. No safe default. */

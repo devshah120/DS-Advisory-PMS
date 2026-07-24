@@ -40,6 +40,8 @@ function EditClientPageInner() {
           broker: client.broker,
           accountNumber: client.accountNumber,
           email: client.email ?? '',
+          // Never prefill a password — blank means "leave the login unchanged".
+          password: '',
           benchmark: client.benchmark,
           riskProfile: client.riskProfile,
           feeRatePercent: String(client.feeRatePercent),

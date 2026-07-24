@@ -11,6 +11,7 @@ import {
   Wallet,
   Percent,
   CalendarDays,
+  Lock,
 } from 'lucide-react';
 import { CreateClientInput, parseApiError } from '@/lib/clients.api';
 import { RiskProfile } from '@/types';
@@ -21,6 +22,8 @@ export interface ClientFormValues {
   broker: string;
   accountNumber: string;
   email: string;
+  /** Login password for the client's account. Required on create; blank on edit means "unchanged". */
+  password: string;
   benchmark: string;
   riskProfile: RiskProfile;
   feeRatePercent: string;
@@ -36,6 +39,7 @@ export const emptyClientForm: ClientFormValues = {
   broker: '',
   accountNumber: '',
   email: '',
+  password: '',
   benchmark: '',
   riskProfile: 'moderate',
   feeRatePercent: '',
@@ -75,9 +79,19 @@ export default function ClientForm({
     if (!form.accountNumber.trim()) e.accountNumber = 'Account number is required';
     else if (form.accountNumber.trim().length < 4)
       e.accountNumber = 'Account number looks too short';
-    // Email is optional, but if entered it must look like an email.
-    if (form.email.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
+    // On create the email is required — it's the login account's unique key.
+    // On edit it stays optional (unless the client never had a login), but if
+    // entered it must still look like an email.
+    if (mode === 'create' && form.email.trim() === '')
+      e.email = 'Email is required to create the login';
+    else if (form.email.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
       e.email = 'Enter a valid email address';
+    // Password: required on create; on edit, blank means "leave unchanged", but
+    // any value entered must meet the 8-char minimum the API enforces.
+    if (mode === 'create' && form.password === '')
+      e.password = 'A login password is required';
+    else if (form.password !== '' && form.password.length < 8)
+      e.password = 'Password must be at least 8 characters';
     if (!form.benchmark.trim()) e.benchmark = 'Benchmark is required';
     if (form.feeRatePercent.trim() === '') e.feeRatePercent = 'Enter the annual fee rate (0 if none)';
     else if (Number(form.feeRatePercent) < 0 || Number(form.feeRatePercent) > 100)
@@ -105,6 +119,9 @@ export default function ClientForm({
       benchmark: form.benchmark.trim(),
       // Only send email when entered — the API rejects an empty string.
       ...(form.email.trim() ? { email: form.email.trim() } : {}),
+      // Send the login password only when set. On edit a blank field is omitted
+      // so the existing password is left unchanged.
+      ...(form.password ? { password: form.password } : {}),
       riskProfile: form.riskProfile,
       // The cash-flow method has been retired — every client is transactional.
       accountingMethod: 'transactional',
@@ -166,12 +183,29 @@ export default function ClientForm({
           <Input
             label="Email"
             type="email"
+            required={mode === 'create'}
             placeholder="contact@evergreen.com"
             leftIcon={<Mail className="h-4 w-4" />}
             value={form.email}
             onChange={(e) => set('email', e.target.value)}
             error={errors.email}
-            helper="Optional contact email for this mandate"
+            helper="The client's login email — also used as their contact address"
+          />
+          <Input
+            label="Login Password"
+            type="password"
+            required={mode === 'create'}
+            autoComplete="new-password"
+            placeholder={mode === 'edit' ? 'Leave blank to keep current' : 'At least 8 characters'}
+            leftIcon={<Lock className="h-4 w-4" />}
+            value={form.password}
+            onChange={(e) => set('password', e.target.value)}
+            error={errors.password}
+            helper={
+              mode === 'edit'
+                ? 'Enter a new password to reset the client login, or leave blank'
+                : "The client signs in with this password and the email above"
+            }
           />
           <Input
             label="Benchmark"
