@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api';
+import { clientsApi } from '@/lib/clients.api';
 import { holdingsApi, type BulkImportSummary } from '@/lib/holdings.api';
 import { downloadClientHoldingsWorkbook } from '@/lib/holdingsExport';
 import {
@@ -113,9 +114,37 @@ interface SymbolHolderRow extends ClientPositionRow {
   clientName: string;
 }
 
+/**
+ * A client who does NOT hold the symbol in the open drawer — the deployment
+ * shortlist. Deliberately not a `SymbolHolderRow` with zeros: there is no lot,
+ * so quantity/cost/P&L are not "0", they are absent, and inventing zero columns
+ * would make an un-owned name look like a closed position.
+ */
+interface SymbolNonHolderRow {
+  id: string;
+  srNo: number;
+  clientName: string;
+  /** Live book value (holdings only), summed from the same lots the table shows. */
+  bookValue: number;
+  /** Idle cash — the money actually available to buy this name with. */
+  cashBalance: number;
+  /**
+   * What one average existing holder's position would cost, expressed against
+   * this client's cash. Null when nobody holds it yet (nothing to size against).
+   */
+  cashCoverage: number | null;
+}
+
 export default function HoldingsPage() {
   const { toast } = useToast();
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
+  /**
+   * The full client roster. /holdings alone cannot answer "who does NOT own
+   * this" — a client with no position in a symbol contributes no row to it, and
+   * a client with an empty book contributes no rows at all, so they would be
+   * invisible precisely when they are the most obvious deployment target.
+   */
+  const [allClients, setAllClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'symbols' | 'clients' | 'sectors' | 'all'>('symbols');
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
@@ -146,8 +175,27 @@ export default function HoldingsPage() {
     }
   }
 
+  /**
+   * The roster powers only the "not held by" panel inside the symbol drawer, so
+   * a failure here must not take the page down with it — holdings are what this
+   * screen is for. On failure the panel degrades to an explanatory empty state
+   * rather than silently showing a short list, which would read as "everyone
+   * already owns this" and is the one wrong answer worth guarding against.
+   */
+  async function loadClients() {
+    try {
+      // limit is deliberately high: this is a book of a handful of mandates and
+      // the panel is only correct if it sees every one of them. A default page
+      // size would quietly truncate the roster and under-report non-holders.
+      setAllClients(await clientsApi.list({ limit: 500 }));
+    } catch {
+      setAllClients([]);
+    }
+  }
+
   useEffect(() => {
     loadHoldings();
+    loadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -467,6 +515,71 @@ export default function HoldingsPage() {
     [symbolHolders]
   );
 
+  /**
+   * The inverse of `symbolHolders`: every client who does NOT hold this symbol.
+   *
+   * This is the deployment shortlist — the question "who is still to be topped
+   * up in this name" is answered by the complement of the holders table, and
+   * computing it by hand off the holders list is exactly the kind of thing that
+   * goes wrong when a client's book is empty.
+   *
+   * Ownership is decided by an actual position, not by the presence of a row:
+   * a fully-exited lot can linger at quantity 0, and treating that as ownership
+   * would hide a client who genuinely has nothing left in the name and is
+   * therefore a candidate to re-enter.
+   */
+  const symbolNonHolders: SymbolNonHolderRow[] = useMemo(() => {
+    if (!activeSymbol) return [];
+
+    const ownerIds = new Set(
+      holdings
+        .filter((h) => h.ticker === activeSymbol.symbol && h.quantity > 0)
+        .map((h) => h.clientId)
+    );
+
+    // Live book value per client, derived from the lots on screen. The stored
+    // Client.portfolioValue is a known-drifting display cache (it reads 0 on
+    // live clients holding real money), so it is never used here.
+    const bookValue = new Map<string, number>();
+    holdings.forEach((h) => {
+      bookValue.set(h.clientId, (bookValue.get(h.clientId) ?? 0) + h.quantity * h.currentPrice);
+    });
+
+    // Size the opportunity against what existing holders actually committed,
+    // which is a far better yardstick than a house-wide average. Null when the
+    // name has no holders yet — there is nothing to size against, and inventing
+    // a target would be fabrication.
+    const avgHolderPosition = symbolHolders.length
+      ? symbolTotals.currentValue / symbolHolders.length
+      : null;
+
+    return allClients
+      .filter((c) => !ownerIds.has(c.id))
+      // Most buying power first — that is the order the desk acts in.
+      .sort((a, b) => (b.cashBalance ?? 0) - (a.cashBalance ?? 0))
+      .map((c, i) => {
+        const cash = c.cashBalance ?? 0;
+        return {
+          id: c.id,
+          srNo: i + 1,
+          clientName: c.name,
+          bookValue: bookValue.get(c.id) ?? 0,
+          cashBalance: cash,
+          cashCoverage:
+            avgHolderPosition && avgHolderPosition > 0 ? (cash / avgHolderPosition) * 100 : null,
+        };
+      });
+  }, [allClients, holdings, activeSymbol, symbolHolders.length, symbolTotals.currentValue]);
+
+  /**
+   * Total buying power sitting with clients who don't own this name — the single
+   * number that says how much of an opportunity the gap actually represents.
+   */
+  const nonHolderCash = useMemo(
+    () => symbolNonHolders.reduce((s, r) => s + r.cashBalance, 0),
+    [symbolNonHolders]
+  );
+
   // --- column defs ---
   const symbolColumns: Column<SymbolRow>[] = [
     {
@@ -776,6 +889,85 @@ export default function HoldingsPage() {
           <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.allocPercent)}</span>
         </div>
       ),
+    },
+  ];
+
+  /**
+   * Non-holders carry no position, so the columns describe CAPACITY rather than
+   * performance. The avatar is intentionally muted (surface, not brand gradient)
+   * so a glance at the drawer never confuses the two tables.
+   */
+  const symbolNonHolderColumns: Column<SymbolNonHolderRow>[] = [
+    { key: 'srNo', header: 'Sr No', accessor: (r) => r.srNo, align: 'center', width: '64px' },
+    {
+      key: 'clientName',
+      header: 'Client',
+      accessor: (r) => r.clientName,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-3 text-2xs font-semibold text-ink-secondary">
+            {r.clientName.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="font-semibold text-ink">{r.clientName}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'bookValue',
+      header: 'Book Value',
+      accessor: (r) => r.bookValue,
+      align: 'right',
+      render: (r) =>
+        r.bookValue > 0 ? (
+          formatCurrency(r.bookValue)
+        ) : (
+          // A genuinely empty book is a real state worth naming, not a $0 cell.
+          <span className="text-ink-tertiary">No holdings</span>
+        ),
+    },
+    {
+      key: 'cashBalance',
+      header: 'Available Cash',
+      accessor: (r) => r.cashBalance,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.cashBalance > 0 ? 'text-ink' : 'text-ink-tertiary')}>
+          {formatCurrency(r.cashBalance)}
+        </span>
+      ),
+    },
+    {
+      key: 'cashCoverage',
+      header: 'Cash vs Avg Position',
+      accessor: (r) => r.cashCoverage ?? -1,
+      align: 'right',
+      render: (r) => {
+        if (r.cashCoverage === null) {
+          return <span className="text-ink-tertiary">—</span>;
+        }
+        // Capped at 100% for the bar only — a client with 5x the cash needed is
+        // "fully covered", and letting the bar overflow would imply a scale it
+        // does not have. The number beside it stays uncapped and truthful.
+        const funded = r.cashCoverage >= 100;
+        return (
+          <div className="flex items-center justify-end gap-2">
+            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
+              <div
+                className={cn('h-full rounded-full', funded ? 'bg-success' : 'bg-brand')}
+                style={{ width: `${Math.min(r.cashCoverage, 100)}%` }}
+              />
+            </div>
+            <span
+              className={cn(
+                'w-14 text-right tabular-nums',
+                funded ? 'font-semibold text-success' : 'text-ink-secondary'
+              )}
+            >
+              {formatPct(r.cashCoverage)}
+            </span>
+          </div>
+        );
+      },
     },
   ];
 
@@ -1162,7 +1354,8 @@ export default function HoldingsPage() {
           activeSymbol
             ? `${activeSymbol.company} · ${symbolHolders.length} client${
                 symbolHolders.length === 1 ? '' : 's'
-              } · ${formatCurrency(symbolTotals.currentValue)} current value`
+              } · ${formatCurrency(symbolTotals.currentValue)} current value` +
+              (symbolNonHolders.length ? ` · ${symbolNonHolders.length} not holding` : '')
             : ''
         }
         width={1180}
@@ -1202,6 +1395,54 @@ export default function HoldingsPage() {
               emptyTitle="No holders"
               emptyDescription="No client holds this symbol."
             />
+
+            {/* The complement — who is still to be deployed into this name. */}
+            <div className="border-t border-line pt-5">
+              <div className="mb-3 flex items-baseline justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-ink">
+                    Not held by
+                    <span className="ml-2 text-ink-tertiary">
+                      {symbolNonHolders.length} client{symbolNonHolders.length === 1 ? '' : 's'}
+                    </span>
+                  </h3>
+                  <p className="mt-0.5 text-xs text-ink-tertiary">
+                    Clients with no position in {activeSymbol.symbol} — the deployment shortlist,
+                    ordered by available cash.
+                  </p>
+                </div>
+                {nonHolderCash > 0 && (
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs text-ink-tertiary">Undeployed cash</p>
+                    <p className="text-sm font-semibold tabular-nums text-ink">
+                      {formatCurrency(nonHolderCash)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <DataTable
+                columns={symbolNonHolderColumns}
+                data={symbolNonHolders}
+                rowKey={(r) => r.id}
+                pageSize={10}
+                searchPlaceholder="Search clients…"
+                onExport={(rows) => {
+                  exportToCsv(
+                    `${activeSymbol.symbol}-not-held.csv`,
+                    symbolNonHolderColumns,
+                    rows
+                  );
+                  toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+                }}
+                emptyTitle={allClients.length ? 'Held by every client' : 'Client list unavailable'}
+                emptyDescription={
+                  allClients.length
+                    ? `Every client on the book already holds ${activeSymbol.symbol}.`
+                    : 'The client roster could not be loaded, so non-holders cannot be listed. Reload the page to try again.'
+                }
+              />
+            </div>
           </div>
         )}
       </Drawer>
