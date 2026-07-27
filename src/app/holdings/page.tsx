@@ -86,6 +86,7 @@ interface ClientPositionRow {
   srNo: number;
   symbol: string;
   name: string;
+  sector: string;
   quantity: number;
   averageCostBasis: number;
   costBasisTotal: number;
@@ -390,6 +391,9 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          // Same fallback as the sector rollup, so an unlabelled holding lands
+          // in one bucket everywhere instead of a blank slice of its own.
+          sector: h.sector || 'Uncategorized',
           quantity: h.quantity,
           averageCostBasis: h.averageCost,
           costBasisTotal,
@@ -436,6 +440,7 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          sector: h.sector || 'Uncategorized',
           clientName: h.client?.name ?? 'Unknown',
           quantity: h.quantity,
           averageCostBasis: h.averageCost,
@@ -489,6 +494,7 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          sector: h.sector || 'Uncategorized',
           clientName: h.client?.name ?? 'Unknown',
           quantity: h.quantity,
           averageCostBasis: h.averageCost,

@@ -9,6 +9,8 @@ export interface HoldingsExportRow {
   srNo: number;
   symbol: string;
   name: string;
+  /** Drives the sector allocation block; already defaulted to 'Uncategorized'. */
+  sector: string;
   quantity: number;
   averageCostBasis: number;
   costBasisTotal: number;
@@ -52,6 +54,64 @@ const LOSS_FILL: ExcelJS.Fill = {
   pattern: 'solid',
   fgColor: { argb: 'FFFFC7CE' },
 };
+
+/**
+ * Slice colours for the sector pie. Ordered so adjacent slices stay
+ * distinguishable, and picked to remain separable in greyscale for the advisors
+ * who print these sheets. Cash always takes CASH_SLICE_COLOR instead, wherever
+ * it lands in the ordering.
+ */
+const SECTOR_COLORS = [
+  '4C72B0', 'DD8452', '55A868', 'C44E52', '8172B3',
+  '937860', 'DA8BC3', '8C8C8C', 'CCB974', '64B5CD',
+];
+const CASH_SLICE_COLOR = 'B0B0B0';
+
+/** One sector's share of the portfolio, as rendered in the allocation block. */
+interface SectorSlice {
+  label: string;
+  value: number;
+  /** Fraction of the portfolio, 0–1. */
+  weight: number;
+  /** Slice fill, 6-digit hex without the alpha prefix. */
+  color: string;
+}
+
+/**
+ * Rolls positions up by sector, largest first, with cash as its own slice.
+ * Cash belongs in the mix because the chart answers "where is this portfolio's
+ * money", and an uninvested balance is a real answer to that.
+ */
+function buildSectorSlices(rows: HoldingsExportRow[], cashBalance: number): SectorSlice[] {
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.sector || 'Uncategorized';
+    totals.set(key, (totals.get(key) ?? 0) + row.currentValue);
+  }
+
+  const portfolioValue = rows.reduce((s, r) => s + r.currentValue, 0) + cashBalance;
+  if (portfolioValue <= 0) return [];
+
+  const slices = [...totals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value], i) => ({
+      label,
+      value,
+      weight: value / portfolioValue,
+      color: SECTOR_COLORS[i % SECTOR_COLORS.length],
+    }));
+
+  if (cashBalance > 0) {
+    slices.push({
+      label: 'Cash',
+      value: cashBalance,
+      weight: cashBalance / portfolioValue,
+      color: CASH_SLICE_COLOR,
+    });
+  }
+
+  return slices;
+}
 
 interface ColumnSpec {
   header: string;
@@ -164,6 +224,7 @@ export function buildClientHoldingsWorkbook(
   applyAllocationGradient(sheet, rows.length);
   if (cashBalance > 0) addCashRow(sheet, rows, cashBalance);
   addTotalRow(sheet, rows, cashBalance);
+  addSectorAllocationBlock(wb, sheet, buildSectorSlices(rows, cashBalance));
 
   return wb;
 }
@@ -300,6 +361,152 @@ function addTotalRow(
     cell.alignment = { horizontal: spec.align, vertical: 'middle' };
     cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
     if (spec.numFmt && cell.value !== null) cell.numFmt = spec.numFmt;
+  });
+}
+
+/**
+ * Draws the sector pie to a canvas and returns it as a PNG data URL.
+ *
+ * ExcelJS has no chart API — it cannot emit a native, data-bound Excel chart —
+ * so the pie ships as an embedded image beside a live table of the same
+ * numbers. Rendered at 2x and scaled down on insert so it stays sharp on a
+ * high-DPI screen and in print.
+ *
+ * Returns null when there is no canvas (server-side rendering, or a test
+ * environment); callers fall back to the table alone rather than failing the
+ * whole export for a decorative element.
+ */
+function renderSectorPiePng(slices: SectorSlice[]): string | null {
+  if (typeof document === 'undefined' || slices.length === 0) return null;
+
+  const SCALE = 2;
+  const W = 420;
+  const H = 260;
+  const canvas = document.createElement('canvas');
+  canvas.width = W * SCALE;
+  canvas.height = H * SCALE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.scale(SCALE, SCALE);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = 130;
+  const cy = H / 2;
+  const radius = 100;
+
+  // Start at 12 o'clock and sweep clockwise, which is how the reference
+  // workbook's charts read.
+  let angle = -Math.PI / 2;
+  for (const slice of slices) {
+    const sweep = slice.weight * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, angle, angle + sweep);
+    ctx.closePath();
+    ctx.fillStyle = `#${slice.color}`;
+    ctx.fill();
+    // Hairline separator so neighbouring slices stay distinct when two sectors
+    // are close in size.
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    angle += sweep;
+  }
+
+  // Legend, one row per slice, to the right of the pie.
+  const legendX = 250;
+  const lineHeight = 18;
+  const legendTop = cy - (slices.length * lineHeight) / 2 + 6;
+  ctx.textBaseline = 'middle';
+  slices.forEach((slice, i) => {
+    const y = legendTop + i * lineHeight;
+    ctx.fillStyle = `#${slice.color}`;
+    ctx.fillRect(legendX, y - 5, 10, 10);
+    ctx.fillStyle = '#000000';
+    ctx.font = '11px Perpetua, Georgia, serif';
+    const pct = `${Math.round(slice.weight * 100)}%`;
+    // Long sector names are clipped rather than wrapped so every legend row
+    // stays one line and aligned with its swatch.
+    const label = slice.label.length > 20 ? `${slice.label.slice(0, 19)}…` : slice.label;
+    ctx.fillText(`${label} — ${pct}`, legendX + 16, y);
+  });
+
+  return canvas.toDataURL('image/png');
+}
+
+/**
+ * The sector allocation block: a heading, a table of sectors with values and
+ * weights, and the pie image beside it. Written below the TOTAL with a blank
+ * spacer row, so the positions table above stays a clean rectangular range that
+ * still sorts and filters on its own.
+ */
+function addSectorAllocationBlock(
+  wb: ExcelJS.Workbook,
+  sheet: ExcelJS.Worksheet,
+  slices: SectorSlice[]
+): void {
+  if (slices.length === 0) return;
+
+  sheet.addRow([]);
+  const headingRow = sheet.addRow(['Sector Allocation']);
+  const headingCell = headingRow.getCell(1);
+  headingCell.font = { name: FONT_NAME, size: HEADING_SIZE, bold: true };
+  headingRow.height = 20;
+
+  const firstDataRow = sheet.rowCount + 1;
+
+  const header = sheet.addRow(['Sector', 'Value', '% of Portfolio']);
+  header.eachCell((cell, col) => {
+    if (col > 3) return;
+    cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
+    cell.border = THIN_BORDER;
+    cell.alignment = { horizontal: col === 1 ? 'left' : 'center', vertical: 'middle' };
+  });
+
+  for (const slice of slices) {
+    const row = sheet.addRow([slice.label, slice.value, slice.weight]);
+    row.eachCell((cell, col) => {
+      if (col > 3) return;
+      cell.font = { name: FONT_NAME, size: BODY_SIZE };
+      cell.border = THIN_BORDER;
+      cell.alignment = { horizontal: col === 1 ? 'left' : 'right', vertical: 'middle' };
+      if (col === 2) cell.numFmt = WHOLE_NUMBER;
+      if (col === 3) cell.numFmt = WHOLE_PERCENT;
+    });
+    // The swatch in column A ties each row to its slice in the pie.
+    row.getCell(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: `FF${slice.color}` },
+    };
+  }
+
+  const totalRow = sheet.addRow([
+    'TOTAL',
+    slices.reduce((s, x) => s + x.value, 0),
+    slices.reduce((s, x) => s + x.weight, 0),
+  ]);
+  totalRow.eachCell((cell, col) => {
+    if (col > 3) return;
+    cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
+    cell.alignment = { horizontal: col === 1 ? 'left' : 'right', vertical: 'middle' };
+    cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
+    if (col === 2) cell.numFmt = WHOLE_NUMBER;
+    if (col === 3) cell.numFmt = WHOLE_PERCENT;
+  });
+
+  const png = renderSectorPiePng(slices);
+  if (!png) return;
+
+  const imageId = wb.addImage({ base64: png, extension: 'png' });
+  // Anchored to column E so it clears the three-column table, and sized in
+  // points rather than by cell range so the pie keeps its aspect ratio
+  // regardless of the column widths above it.
+  sheet.addImage(imageId, {
+    tl: { col: 4, row: firstDataRow - 1 },
+    ext: { width: 420, height: 260 },
   });
 }
 
