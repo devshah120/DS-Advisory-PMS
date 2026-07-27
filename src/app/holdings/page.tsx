@@ -128,11 +128,6 @@ interface SymbolNonHolderRow {
   bookValue: number;
   /** Idle cash — the money actually available to buy this name with. */
   cashBalance: number;
-  /**
-   * What one average existing holder's position would cost, expressed against
-   * this client's cash. Null when nobody holds it yet (nothing to size against).
-   */
-  cashCoverage: number | null;
 }
 
 export default function HoldingsPage() {
@@ -375,7 +370,12 @@ export default function HoldingsPage() {
   const clientPositions: ClientPositionRow[] = useMemo(() => {
     if (!activeClient) return [];
     const owned = holdings.filter((h) => h.clientId === activeClient.clientId);
-    const total = owned.reduce((s, h) => s + h.quantity * h.currentPrice, 0);
+    // Weights are a share of the whole portfolio, so idle cash sits in the
+    // denominator alongside the positions. A client holding cash is genuinely
+    // less exposed to each name than the position values alone would suggest,
+    // and the stock weights have to add up to less than 100% to say so.
+    const total =
+      owned.reduce((s, h) => s + h.quantity * h.currentPrice, 0) + activeClient.cashBalance;
     return owned
       .slice()
       .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
@@ -545,31 +545,18 @@ export default function HoldingsPage() {
       bookValue.set(h.clientId, (bookValue.get(h.clientId) ?? 0) + h.quantity * h.currentPrice);
     });
 
-    // Size the opportunity against what existing holders actually committed,
-    // which is a far better yardstick than a house-wide average. Null when the
-    // name has no holders yet — there is nothing to size against, and inventing
-    // a target would be fabrication.
-    const avgHolderPosition = symbolHolders.length
-      ? symbolTotals.currentValue / symbolHolders.length
-      : null;
-
     return allClients
       .filter((c) => !ownerIds.has(c.id))
       // Most buying power first — that is the order the desk acts in.
       .sort((a, b) => (b.cashBalance ?? 0) - (a.cashBalance ?? 0))
-      .map((c, i) => {
-        const cash = c.cashBalance ?? 0;
-        return {
-          id: c.id,
-          srNo: i + 1,
-          clientName: c.name,
-          bookValue: bookValue.get(c.id) ?? 0,
-          cashBalance: cash,
-          cashCoverage:
-            avgHolderPosition && avgHolderPosition > 0 ? (cash / avgHolderPosition) * 100 : null,
-        };
-      });
-  }, [allClients, holdings, activeSymbol, symbolHolders.length, symbolTotals.currentValue]);
+      .map((c, i) => ({
+        id: c.id,
+        srNo: i + 1,
+        clientName: c.name,
+        bookValue: bookValue.get(c.id) ?? 0,
+        cashBalance: c.cashBalance ?? 0,
+      }));
+  }, [allClients, holdings, activeSymbol]);
 
   /**
    * Total buying power sitting with clients who don't own this name — the single
@@ -936,39 +923,6 @@ export default function HoldingsPage() {
         </span>
       ),
     },
-    {
-      key: 'cashCoverage',
-      header: 'Cash vs Avg Position',
-      accessor: (r) => r.cashCoverage ?? -1,
-      align: 'right',
-      render: (r) => {
-        if (r.cashCoverage === null) {
-          return <span className="text-ink-tertiary">—</span>;
-        }
-        // Capped at 100% for the bar only — a client with 5x the cash needed is
-        // "fully covered", and letting the bar overflow would imply a scale it
-        // does not have. The number beside it stays uncapped and truthful.
-        const funded = r.cashCoverage >= 100;
-        return (
-          <div className="flex items-center justify-end gap-2">
-            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
-              <div
-                className={cn('h-full rounded-full', funded ? 'bg-success' : 'bg-brand')}
-                style={{ width: `${Math.min(r.cashCoverage, 100)}%` }}
-              />
-            </div>
-            <span
-              className={cn(
-                'w-14 text-right tabular-nums',
-                funded ? 'font-semibold text-success' : 'text-ink-secondary'
-              )}
-            >
-              {formatPct(r.cashCoverage)}
-            </span>
-          </div>
-        );
-      },
-    },
   ];
 
   const sectorColumns: Column<SectorRow>[] = [
@@ -1194,7 +1148,16 @@ export default function HoldingsPage() {
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
               <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(clientTotals.costBasisTotal)} />
-              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(clientTotals.currentValue)} />
+              <SummaryTile
+                icon={<Briefcase className="h-4 w-4" />}
+                label="Current Value"
+                value={formatCurrency(clientTotals.currentValue)}
+                hint={
+                  activeClient.cashBalance > 0
+                    ? `${formatCurrency(clientTotals.currentValue + activeClient.cashBalance)} incl. cash`
+                    : undefined
+                }
+              />
               <SummaryTile
                 icon={<PiggyBank className="h-4 w-4" />}
                 label="Cash Available"
@@ -1224,7 +1187,7 @@ export default function HoldingsPage() {
               pageSize={20}
               searchPlaceholder="Search symbols or names…"
               onExport={(rows) => {
-                downloadClientHoldingsWorkbook(activeClient.clientName, rows)
+                downloadClientHoldingsWorkbook(activeClient.clientName, rows, activeClient.cashBalance)
                   .then(() =>
                     toast({
                       tone: 'success',

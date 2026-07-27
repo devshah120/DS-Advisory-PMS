@@ -117,10 +117,15 @@ const PL_PERCENT_COLUMN = COLUMNS.length - 1;
  * a green gradient down the allocation column so the largest position reads
  * darkest. Rows are written in the order given — the caller sorts by current
  * value, which is the same ordering as allocation.
+ *
+ * `cashBalance` is the client's idle cash. When present it is written as its
+ * own line below the positions and folded into the TOTAL, so the sheet foots to
+ * the actual portfolio value and the weights sum to 100%.
  */
 export function buildClientHoldingsWorkbook(
   clientName: string,
-  rows: HoldingsExportRow[]
+  rows: HoldingsExportRow[],
+  cashBalance = 0
 ): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'DS Advisory';
@@ -157,9 +162,55 @@ export function buildClientHoldingsWorkbook(
   }
 
   applyAllocationGradient(sheet, rows.length);
-  addTotalRow(sheet, rows);
+  if (cashBalance > 0) addCashRow(sheet, rows, cashBalance);
+  addTotalRow(sheet, rows, cashBalance);
 
   return wb;
+}
+
+/**
+ * Idle cash as a line of its own. It carries a current value and a weight but
+ * no cost basis or P&L — cash isn't a position that can gain or lose, so those
+ * columns stay blank rather than reading as a flat 0% return. Deliberately not
+ * part of the gradient above, which ranks the invested names against each other.
+ */
+function addCashRow(
+  sheet: ExcelJS.Worksheet,
+  rows: HoldingsExportRow[],
+  cashBalance: number
+): void {
+  const portfolioValue = rows.reduce((s, r) => s + r.currentValue, 0) + cashBalance;
+
+  const cells: (string | number | null)[] = [
+    rows.length + 1,
+    'CASH',
+    'Cash & Equivalents',
+    null,
+    null,
+    null,
+    null,
+    cashBalance,
+    null,
+    null,
+    portfolioValue ? cashBalance / portfolioValue : 0,
+  ];
+
+  const row = sheet.addRow(cells);
+  row.eachCell({ includeEmpty: true }, (cell, col) => {
+    const spec = COLUMNS[col - 1];
+    cell.font = { name: FONT_NAME, size: BODY_SIZE, italic: true };
+    cell.border = THIN_BORDER;
+    cell.alignment = { horizontal: spec.align, vertical: 'middle' };
+    if (spec.numFmt && cell.value !== null) cell.numFmt = spec.numFmt;
+  });
+
+  // A neutral fill keeps the cash weight legible without implying it belongs on
+  // the green scale used to rank the invested positions.
+  row.getCell(ALLOC_COLUMN).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF0F0F0' },
+  };
 }
 
 /**
@@ -205,8 +256,18 @@ function greenAt(t: number): string {
   return `FF${hex(mix(light.r, dark.r))}${hex(mix(light.g, dark.g))}${hex(mix(light.b, dark.b))}`;
 }
 
-/** Bold TOTAL line summing the money columns, ruled off from the positions. */
-function addTotalRow(sheet: ExcelJS.Worksheet, rows: HoldingsExportRow[]): void {
+/**
+ * Bold TOTAL line summing the money columns, ruled off from the positions.
+ * Current value includes cash so the sheet foots to the portfolio value the
+ * client sees; cost basis and P&L stay invested-only, which keeps the return
+ * percentage a statement about the portfolio's performance rather than one
+ * diluted by an uninvested balance.
+ */
+function addTotalRow(
+  sheet: ExcelJS.Worksheet,
+  rows: HoldingsExportRow[],
+  cashBalance = 0
+): void {
   const totals = rows.reduce(
     (acc, r) => ({
       costBasisTotal: acc.costBasisTotal + r.costBasisTotal,
@@ -224,7 +285,7 @@ function addTotalRow(sheet: ExcelJS.Worksheet, rows: HoldingsExportRow[]): void 
     null,
     totals.costBasisTotal,
     null,
-    totals.currentValue,
+    totals.currentValue + cashBalance,
     totals.pl,
     // Book-level return, computed off the totals rather than averaging the
     // per-row percentages, which would weight a tiny position like a large one.
@@ -245,9 +306,10 @@ function addTotalRow(sheet: ExcelJS.Worksheet, rows: HoldingsExportRow[]): void 
 /** Builds the workbook and hands it to the browser as an .xlsx download. */
 export async function downloadClientHoldingsWorkbook(
   clientName: string,
-  rows: HoldingsExportRow[]
+  rows: HoldingsExportRow[],
+  cashBalance = 0
 ): Promise<void> {
-  const wb = buildClientHoldingsWorkbook(clientName, rows);
+  const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
