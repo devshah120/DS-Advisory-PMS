@@ -264,7 +264,12 @@ function MethodBanner({
 }
 
 function ReturnRow({ data }: { data: PerformanceOk }) {
-  const alpha = data.alpha;
+  // The headline Alpha is the INTERIM one — the spread measured over the same
+  // window as the Interim Return tile beside it, so the two tiles are read on
+  // the same basis. The annualized spread is still reported, but in the
+  // benchmark breakdown below where its basis is spelled out: on a young
+  // account annualizing magnifies a small interim gap into a dramatic number.
+  const alpha = data.alphaInterim;
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -294,11 +299,13 @@ function ReturnRow({ data }: { data: PerformanceOk }) {
         }
       />
       <Kpi
-        label="Alpha"
+        label="Alpha (QTD)"
         value={alpha}
         format={signedPct}
         sublabel={
-          data.benchmark ? `vs ${data.benchmark.code}, annualized` : 'no benchmark set'
+          data.benchmark
+            ? `vs ${data.benchmark.code}, over ${data.periodDays} days`
+            : 'no benchmark set'
         }
         icon={<Scale className="h-4 w-4" />}
         accent={alpha !== null && alpha >= 0 ? 'success' : 'danger'}
@@ -365,16 +372,19 @@ function BenchmarkCard({ data }: { data: PerformanceOk }) {
     ['Benchmark value today', b.value !== null ? formatCurrency(b.value) : '—'],
   ];
 
-  if (data.xirr !== null) {
-    rows.push(['Portfolio XIRR (annualized)', signedPct(data.xirr)]);
-    rows.push(['Alpha (annualized)', signedPct(data.xirr - b.xirr), true]);
-  }
+  // Interim first: it is what the headline tile reports, so the breakdown reads
+  // in the same order the operator saw it. The annualized spread follows as the
+  // reconciliation figure rather than the lead.
   if (data.interimReturn !== null && b.interim !== null) {
     rows.push([
-      'Alpha (interim, same window)',
+      'Alpha (QTD, same window)',
       signedPct(data.interimReturn - b.interim),
       true,
     ]);
+  }
+  if (data.xirr !== null) {
+    rows.push(['Portfolio XIRR (annualized)', signedPct(data.xirr)]);
+    rows.push(['Alpha (annualized)', signedPct(data.xirr - b.xirr)]);
   }
 
   return (
@@ -405,13 +415,14 @@ function BenchmarkCard({ data }: { data: PerformanceOk }) {
           </div>
         ))}
       </div>
-      {/* Both Alphas are shown because they are different numbers and the brief
-          and the workbook each use one. Annualizing magnifies a small interim
-          gap, so on a young account the annualized spread overstates the edge. */}
+      {/* Both Alphas stay on the page because they are different numbers and the
+          brief and the workbook each use one. The interim figure leads; the
+          annualized one is kept for reconciliation against the workbook. */}
       <p className="mt-3 text-[12px] leading-relaxed text-ink-tertiary">
-        Annualized Alpha is Portfolio XIRR minus Benchmark XIRR. Interim Alpha is the
-        same spread measured over the {data.periodDays}-day holding period — on a short
-        window the annualized figure magnifies the gap.
+        QTD Alpha is the portfolio&apos;s interim return minus the benchmark&apos;s,
+        both measured over the same {data.periodDays}-day window — this is the headline
+        figure. Annualized Alpha is Portfolio XIRR minus Benchmark XIRR; on a short
+        window annualizing magnifies the same gap.
       </p>
     </Card>
   );
