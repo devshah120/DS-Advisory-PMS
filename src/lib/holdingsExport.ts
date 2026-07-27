@@ -441,7 +441,14 @@ function renderSectorPiePng(slices: SectorSlice[]): string | null {
  * weights, and the pie image beside it. Written below the TOTAL with a blank
  * spacer row, so the positions table above stays a clean rectangular range that
  * still sorts and filters on its own.
+ *
+ * Indented to start at column C rather than A: the narrow 'Sr No' and 'Symbol'
+ * widths above clipped the sector names, whereas column C carries the wide
+ * 'Name' width and gives every label room to read in full.
  */
+const SECTOR_FIRST_COL = 3;
+const SECTOR_LAST_COL = SECTOR_FIRST_COL + 2;
+
 function addSectorAllocationBlock(
   wb: ExcelJS.Workbook,
   sheet: ExcelJS.Worksheet,
@@ -449,63 +456,74 @@ function addSectorAllocationBlock(
 ): void {
   if (slices.length === 0) return;
 
+  /** Places values at SECTOR_FIRST_COL, leaving the columns to their left blank. */
+  const indented = (cells: Array<string | number>) => [
+    ...Array(SECTOR_FIRST_COL - 1).fill(null),
+    ...cells,
+  ];
+  /** True for the label column, which stays left-aligned while the figures don't. */
+  const isLabelCol = (col: number) => col === SECTOR_FIRST_COL;
+  const inBlock = (col: number) => col >= SECTOR_FIRST_COL && col <= SECTOR_LAST_COL;
+
   sheet.addRow([]);
-  const headingRow = sheet.addRow(['Sector Allocation']);
-  const headingCell = headingRow.getCell(1);
+  const headingRow = sheet.addRow(indented(['Sector Allocation']));
+  const headingCell = headingRow.getCell(SECTOR_FIRST_COL);
   headingCell.font = { name: FONT_NAME, size: HEADING_SIZE, bold: true };
   headingRow.height = 20;
 
   const firstDataRow = sheet.rowCount + 1;
 
-  const header = sheet.addRow(['Sector', 'Value', '% of Portfolio']);
+  const header = sheet.addRow(indented(['Sector', 'Value', '% of Portfolio']));
   header.eachCell((cell, col) => {
-    if (col > 3) return;
+    if (!inBlock(col)) return;
     cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
     cell.border = THIN_BORDER;
-    cell.alignment = { horizontal: col === 1 ? 'left' : 'center', vertical: 'middle' };
+    cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'center', vertical: 'middle' };
   });
 
   for (const slice of slices) {
-    const row = sheet.addRow([slice.label, slice.value, slice.weight]);
+    const row = sheet.addRow(indented([slice.label, slice.value, slice.weight]));
     row.eachCell((cell, col) => {
-      if (col > 3) return;
+      if (!inBlock(col)) return;
       cell.font = { name: FONT_NAME, size: BODY_SIZE };
       cell.border = THIN_BORDER;
-      cell.alignment = { horizontal: col === 1 ? 'left' : 'right', vertical: 'middle' };
-      if (col === 2) cell.numFmt = WHOLE_NUMBER;
-      if (col === 3) cell.numFmt = WHOLE_PERCENT;
+      cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'right', vertical: 'middle' };
+      if (col === SECTOR_FIRST_COL + 1) cell.numFmt = WHOLE_NUMBER;
+      if (col === SECTOR_LAST_COL) cell.numFmt = WHOLE_PERCENT;
     });
-    // The swatch in column A ties each row to its slice in the pie.
-    row.getCell(1).fill = {
+    // The swatch on the label cell ties each row to its slice in the pie.
+    row.getCell(SECTOR_FIRST_COL).fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: `FF${slice.color}` },
     };
   }
 
-  const totalRow = sheet.addRow([
-    'TOTAL',
-    slices.reduce((s, x) => s + x.value, 0),
-    slices.reduce((s, x) => s + x.weight, 0),
-  ]);
+  const totalRow = sheet.addRow(
+    indented([
+      'TOTAL',
+      slices.reduce((s, x) => s + x.value, 0),
+      slices.reduce((s, x) => s + x.weight, 0),
+    ])
+  );
   totalRow.eachCell((cell, col) => {
-    if (col > 3) return;
+    if (!inBlock(col)) return;
     cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
-    cell.alignment = { horizontal: col === 1 ? 'left' : 'right', vertical: 'middle' };
+    cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'right', vertical: 'middle' };
     cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
-    if (col === 2) cell.numFmt = WHOLE_NUMBER;
-    if (col === 3) cell.numFmt = WHOLE_PERCENT;
+    if (col === SECTOR_FIRST_COL + 1) cell.numFmt = WHOLE_NUMBER;
+    if (col === SECTOR_LAST_COL) cell.numFmt = WHOLE_PERCENT;
   });
 
   const png = renderSectorPiePng(slices);
   if (!png) return;
 
   const imageId = wb.addImage({ base64: png, extension: 'png' });
-  // Anchored to column E so it clears the three-column table, and sized in
+  // Anchored just past the table's last column so it clears it, and sized in
   // points rather than by cell range so the pie keeps its aspect ratio
   // regardless of the column widths above it.
   sheet.addImage(imageId, {
-    tl: { col: 4, row: firstDataRow - 1 },
+    tl: { col: SECTOR_LAST_COL + 1, row: firstDataRow - 1 },
     ext: { width: 420, height: 260 },
   });
 }
