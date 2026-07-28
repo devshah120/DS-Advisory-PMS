@@ -58,6 +58,12 @@ function handleMock(config: any): any | undefined {
   // against the database and a real JWT is issued — never a fake token, even
   // when the rest of the app runs on mock data.
 
+  // --- Users / Settings ---
+  // Profile, preferences, notifications and password all read and write the
+  // signed-in user's own row, keyed off the JWT. A fixture would make saves look
+  // like they persisted when nothing was written, so — like /auth — these always
+  // fall through to the real backend.
+
   // --- Dashboard ---
   // Overview and market-overview both need live market data (holdings P&L,
   // Yahoo quotes), so — like /watchlist and /market/* — these fall through

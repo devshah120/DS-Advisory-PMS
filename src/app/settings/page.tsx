@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   User,
   Mail,
@@ -12,6 +12,14 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AppShell from '@/components/layout/AppShell';
+import { parseApiError } from '@/lib/clients.api';
+import {
+  usersApi,
+  type UserNotifications,
+  type UserPreferences,
+  type UserProfile,
+} from '@/lib/users.api';
+import type { UserRole } from '@/types';
 import {
   Card,
   CardHeader,
@@ -20,51 +28,194 @@ import {
   Button,
   Badge,
   Tabs,
+  Skeleton,
   useToast,
 } from '@/components/ui';
 
 type Section = 'profile' | 'preferences' | 'notifications' | 'security';
 
+interface ProfileForm {
+  firstName: string;
+  lastName: string;
+  email: string;
+  organization: string;
+  role: UserRole;
+}
+
+const EMPTY_PROFILE: ProfileForm = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  organization: '',
+  role: 'portfolio_manager',
+};
+
+const toForm = (p: UserProfile): ProfileForm => ({
+  firstName: p.firstName,
+  lastName: p.lastName,
+  email: p.email,
+  // The API stores "not set" as null; the input needs a string.
+  organization: p.organization ?? '',
+  role: p.role,
+});
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const [section, setSection] = useState<Section>('profile');
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [profile, setProfile] = useState({
-    firstName: 'Dev',
-    lastName: 'User',
-    email: 'altas@gmail.com',
-    organization: 'Atlas Capital',
-    role: 'portfolio_manager',
-  });
+  const [profile, setProfile] = useState<ProfileForm>(EMPTY_PROFILE);
+  const [prefs, setPrefs] = useState<UserPreferences | null>(null);
+  const [notifications, setNotifications] = useState<UserNotifications | null>(null);
 
-  const [prefs, setPrefs] = useState({
-    theme: 'system',
-    baseCurrency: 'USD',
-    dateFormat: 'MMM D, YYYY',
-    numberFormat: 'en-US',
-    density: 'comfortable',
-  });
+  // Server state for the visible tab, so "Save changes" can send only what the
+  // user actually changed and stay disabled while the form is untouched.
+  const [savedProfile, setSavedProfile] = useState<ProfileForm>(EMPTY_PROFILE);
+  const [savedPrefs, setSavedPrefs] = useState<UserPreferences | null>(null);
+  const [savedNotifications, setSavedNotifications] =
+    useState<UserNotifications | null>(null);
 
-  const [notifications, setNotifications] = useState({
-    tradeAlerts: true,
-    priceTargets: true,
-    weeklyDigest: true,
-    corporateActions: false,
-    productUpdates: false,
-  });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const setP = (k: string, v: string) => setProfile((p) => ({ ...p, [k]: v }));
-  const setPref = (k: string, v: string) => setPrefs((p) => ({ ...p, [k]: v }));
-  const toggleNotif = (k: keyof typeof notifications) =>
-    setNotifications((n) => ({ ...n, [k]: !n[k] }));
+  // Password form — deliberately separate from the tab-level save: it has its
+  // own button, its own validation, and is never part of a bulk patch.
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [pwErrors, setPwErrors] = useState<Record<string, string>>({});
+  const [pwSaving, setPwSaving] = useState(false);
 
-  const save = () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [p, pr, n] = await Promise.all([
+        usersApi.getProfile(),
+        usersApi.getPreferences(),
+        usersApi.getNotifications(),
+      ]);
+      const form = toForm(p);
+      setProfile(form);
+      setSavedProfile(form);
+      setPrefs(pr);
+      setSavedPrefs(pr);
+      setNotifications(n);
+      setSavedNotifications(n);
+    } catch (err) {
+      setLoadError(parseApiError(err).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const setP = (k: keyof ProfileForm, v: string) => {
+    setProfile((p) => ({ ...p, [k]: v }));
+    // Clear the inline error as soon as the user edits that field.
+    setFieldErrors((e) => (e[k] ? { ...e, [k]: '' } : e));
+  };
+  const setPref = (k: keyof UserPreferences, v: string) =>
+    setPrefs((p) => (p ? { ...p, [k]: v } : p));
+  const toggleNotif = (k: keyof UserNotifications) =>
+    setNotifications((n) => (n ? { ...n, [k]: !n[k] } : n));
+
+  /** Only the keys that differ from what the server last returned. */
+  function diff<T extends object>(next: T, saved: T | null): Partial<T> {
+    if (!saved) return {};
+    const out: Partial<T> = {};
+    for (const key of Object.keys(next) as (keyof T)[]) {
+      if (next[key] !== saved[key]) out[key] = next[key];
+    }
+    return out;
+  }
+
+  const profileChanges = diff(profile, savedProfile);
+  const prefChanges = prefs ? diff(prefs, savedPrefs) : {};
+  const notifChanges = notifications ? diff(notifications, savedNotifications) : {};
+
+  const dirty =
+    section === 'profile'
+      ? Object.keys(profileChanges).length > 0
+      : section === 'preferences'
+        ? Object.keys(prefChanges).length > 0
+        : section === 'notifications'
+          ? Object.keys(notifChanges).length > 0
+          : false;
+
+  /** Mirrors the DTO rules so obvious mistakes never make a round trip. */
+  const validateProfile = () => {
+    const errs: Record<string, string> = {};
+    if (!profile.firstName.trim()) errs.firstName = 'First name is required';
+    if (!profile.lastName.trim()) errs.lastName = 'Last name is required';
+    if (!profile.email.trim()) errs.email = 'Email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email.trim()))
+      errs.email = 'Enter a valid email address';
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const save = async () => {
+    if (!dirty || saving) return;
+
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      if (section === 'profile') {
+        if (!validateProfile()) {
+          setSaving(false);
+          return;
+        }
+        const updated = await usersApi.updateProfile(profileChanges);
+        const form = toForm(updated);
+        setProfile(form);
+        setSavedProfile(form);
+      } else if (section === 'preferences') {
+        const updated = await usersApi.updatePreferences(prefChanges);
+        setPrefs(updated);
+        setSavedPrefs(updated);
+      } else if (section === 'notifications') {
+        const updated = await usersApi.updateNotifications(notifChanges);
+        setNotifications(updated);
+        setSavedNotifications(updated);
+      }
       toast({ tone: 'success', title: 'Settings saved' });
-    }, 700);
+    } catch (err) {
+      const { message, fields } = parseApiError(err);
+      setFieldErrors(fields);
+      toast({ tone: 'error', title: message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const changePassword = async () => {
+    const errs: Record<string, string> = {};
+    if (!pw.current) errs.current = 'Enter your current password';
+    if (!pw.next) errs.next = 'Enter a new password';
+    else if (pw.next.length < 8) errs.next = 'Password must be at least 8 characters';
+    if (pw.next !== pw.confirm) errs.confirm = 'Passwords do not match';
+    setPwErrors(errs);
+    if (Object.keys(errs).length) return;
+
+    setPwSaving(true);
+    try {
+      await usersApi.changePassword({
+        currentPassword: pw.current,
+        newPassword: pw.next,
+      });
+      setPw({ current: '', next: '', confirm: '' });
+      toast({ tone: 'success', title: 'Password updated' });
+    } catch (err) {
+      const { message } = parseApiError(err);
+      // The only field the server can contradict us on is the current password.
+      setPwErrors({ current: message });
+      toast({ tone: 'error', title: message });
+    } finally {
+      setPwSaving(false);
+    }
   };
 
   return (
@@ -72,9 +223,16 @@ export default function SettingsPage() {
       title="Settings"
       subtitle="Manage your profile, preferences, and security"
       actions={
-        <Button loading={saving} leftIcon={<Check className="h-4 w-4" />} onClick={save}>
-          Save changes
-        </Button>
+        section === 'security' ? undefined : (
+          <Button
+            loading={saving}
+            disabled={loading || !dirty}
+            leftIcon={<Check className="h-4 w-4" />}
+            onClick={save}
+          >
+            Save changes
+          </Button>
+        )
       }
     >
       <div className="space-y-6">
@@ -90,186 +248,262 @@ export default function SettingsPage() {
         />
 
         <div className="mx-auto max-w-3xl space-y-6">
-          {section === 'profile' && (
+          {loadError && (
             <Card>
-              <CardHeader title="Profile" subtitle="Your personal and organization details" />
-              <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-                <Input
-                  label="First Name"
-                  leftIcon={<User className="h-4 w-4" />}
-                  value={profile.firstName}
-                  onChange={(e) => setP('firstName', e.target.value)}
-                />
-                <Input
-                  label="Last Name"
-                  leftIcon={<User className="h-4 w-4" />}
-                  value={profile.lastName}
-                  onChange={(e) => setP('lastName', e.target.value)}
-                />
-                <Input
-                  label="Email"
-                  type="email"
-                  leftIcon={<Mail className="h-4 w-4" />}
-                  value={profile.email}
-                  onChange={(e) => setP('email', e.target.value)}
-                />
-                <Input
-                  label="Organization"
-                  leftIcon={<Building2 className="h-4 w-4" />}
-                  value={profile.organization}
-                  onChange={(e) => setP('organization', e.target.value)}
-                />
-                <Select label="Role" value={profile.role} onChange={(e) => setP('role', e.target.value)}>
-                  <option value="admin">Admin</option>
-                  <option value="portfolio_manager">Portfolio Manager</option>
-                  <option value="research_analyst">Research Analyst</option>
-                  <option value="viewer">Viewer</option>
-                </Select>
+              <div className="flex flex-col items-start gap-3 py-2">
+                <div>
+                  <p className="text-[14px] font-medium text-ink">
+                    Couldn&apos;t load your settings
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-ink-secondary">{loadError}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={load}>
+                  Try again
+                </Button>
               </div>
             </Card>
           )}
 
-          {section === 'preferences' && (
-            <Card>
-              <CardHeader
-                title="Preferences"
-                subtitle="Appearance, currency, and formatting"
-              />
-              <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-                <Select label="Theme" value={prefs.theme} onChange={(e) => setPref('theme', e.target.value)}>
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </Select>
-                <Select
-                  label="Base Currency"
-                  value={prefs.baseCurrency}
-                  onChange={(e) => setPref('baseCurrency', e.target.value)}
-                >
-                  <option value="USD">USD — US Dollar</option>
-                  <option value="EUR">EUR — Euro</option>
-                  <option value="GBP">GBP — British Pound</option>
-                  <option value="INR">INR — Indian Rupee</option>
-                </Select>
-                <Select
-                  label="Date Format"
-                  value={prefs.dateFormat}
-                  onChange={(e) => setPref('dateFormat', e.target.value)}
-                >
-                  <option value="MMM D, YYYY">Jun 1, 2026</option>
-                  <option value="DD/MM/YYYY">01/06/2026</option>
-                  <option value="MM/DD/YYYY">06/01/2026</option>
-                  <option value="YYYY-MM-DD">2026-06-01</option>
-                </Select>
-                <Select
-                  label="Number Format"
-                  value={prefs.numberFormat}
-                  onChange={(e) => setPref('numberFormat', e.target.value)}
-                >
-                  <option value="en-US">1,234,567.89</option>
-                  <option value="de-DE">1.234.567,89</option>
-                  <option value="en-IN">12,34,567.89</option>
-                </Select>
-                <Select
-                  label="Table Density"
-                  value={prefs.density}
-                  onChange={(e) => setPref('density', e.target.value)}
-                >
-                  <option value="comfortable">Comfortable</option>
-                  <option value="compact">Compact</option>
-                </Select>
-              </div>
-            </Card>
-          )}
+          {loading && !loadError && <SettingsSkeleton />}
 
-          {section === 'notifications' && (
-            <Card>
-              <CardHeader title="Notifications" subtitle="Choose what we email you about" />
-              <div className="mt-4 divide-y divide-border">
-                <ToggleRow
-                  label="Trade alerts"
-                  description="Confirmations when orders execute across accounts."
-                  checked={notifications.tradeAlerts}
-                  onChange={() => toggleNotif('tradeAlerts')}
-                />
-                <ToggleRow
-                  label="Price targets"
-                  description="Notify when a watchlist idea hits its target price."
-                  checked={notifications.priceTargets}
-                  onChange={() => toggleNotif('priceTargets')}
-                />
-                <ToggleRow
-                  label="Weekly digest"
-                  description="A Monday summary of performance and activity."
-                  checked={notifications.weeklyDigest}
-                  onChange={() => toggleNotif('weeklyDigest')}
-                />
-                <ToggleRow
-                  label="Corporate actions"
-                  description="Upcoming dividends, earnings, splits, and AGMs."
-                  checked={notifications.corporateActions}
-                  onChange={() => toggleNotif('corporateActions')}
-                />
-                <ToggleRow
-                  label="Product updates"
-                  description="Occasional news about new DS Advisory features."
-                  checked={notifications.productUpdates}
-                  onChange={() => toggleNotif('productUpdates')}
-                />
-              </div>
-            </Card>
-          )}
+          {!loading && !loadError && (
+            <>
+              {section === 'profile' && (
+                <Card>
+                  <CardHeader title="Profile" subtitle="Your personal and organization details" />
+                  <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <Input
+                      label="First Name"
+                      leftIcon={<User className="h-4 w-4" />}
+                      value={profile.firstName}
+                      error={fieldErrors.firstName || undefined}
+                      onChange={(e) => setP('firstName', e.target.value)}
+                    />
+                    <Input
+                      label="Last Name"
+                      leftIcon={<User className="h-4 w-4" />}
+                      value={profile.lastName}
+                      error={fieldErrors.lastName || undefined}
+                      onChange={(e) => setP('lastName', e.target.value)}
+                    />
+                    <Input
+                      label="Email"
+                      type="email"
+                      leftIcon={<Mail className="h-4 w-4" />}
+                      value={profile.email}
+                      error={fieldErrors.email || undefined}
+                      onChange={(e) => setP('email', e.target.value)}
+                    />
+                    <Input
+                      label="Organization"
+                      leftIcon={<Building2 className="h-4 w-4" />}
+                      value={profile.organization}
+                      error={fieldErrors.organization || undefined}
+                      onChange={(e) => setP('organization', e.target.value)}
+                    />
+                    <Select
+                      label="Role"
+                      value={profile.role}
+                      error={fieldErrors.role || undefined}
+                      onChange={(e) => setP('role', e.target.value)}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="portfolio_manager">Portfolio Manager</option>
+                      <option value="research_analyst">Research Analyst</option>
+                      <option value="viewer">Viewer</option>
+                    </Select>
+                  </div>
+                </Card>
+              )}
 
-          {section === 'security' && (
-            <div className="space-y-6">
-              <Card>
-                <CardHeader title="Password" subtitle="Update your account password" />
-                <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-                  <Input label="Current Password" type="password" leftIcon={<KeyRound className="h-4 w-4" />} placeholder="••••••••" />
-                  <div className="hidden md:block" />
-                  <Input label="New Password" type="password" leftIcon={<KeyRound className="h-4 w-4" />} placeholder="••••••••" />
-                  <Input label="Confirm New Password" type="password" leftIcon={<KeyRound className="h-4 w-4" />} placeholder="••••••••" />
-                </div>
-                <div className="mt-5">
-                  <Button
-                    variant="outline"
-                    leftIcon={<ShieldCheck className="h-4 w-4" />}
-                    onClick={() => toast({ tone: 'success', title: 'Password updated' })}
-                  >
-                    Update password
-                  </Button>
-                </div>
-              </Card>
+              {section === 'preferences' && prefs && (
+                <Card>
+                  <CardHeader
+                    title="Preferences"
+                    subtitle="Appearance, currency, and formatting"
+                  />
+                  <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+                    <Select label="Theme" value={prefs.theme} onChange={(e) => setPref('theme', e.target.value)}>
+                      <option value="system">System</option>
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </Select>
+                    <Select
+                      label="Base Currency"
+                      value={prefs.baseCurrency}
+                      onChange={(e) => setPref('baseCurrency', e.target.value)}
+                    >
+                      <option value="USD">USD — US Dollar</option>
+                      <option value="EUR">EUR — Euro</option>
+                      <option value="GBP">GBP — British Pound</option>
+                      <option value="INR">INR — Indian Rupee</option>
+                    </Select>
+                    <Select
+                      label="Date Format"
+                      value={prefs.dateFormat}
+                      onChange={(e) => setPref('dateFormat', e.target.value)}
+                    >
+                      <option value="MMM D, YYYY">Jun 1, 2026</option>
+                      <option value="DD/MM/YYYY">01/06/2026</option>
+                      <option value="MM/DD/YYYY">06/01/2026</option>
+                      <option value="YYYY-MM-DD">2026-06-01</option>
+                    </Select>
+                    <Select
+                      label="Number Format"
+                      value={prefs.numberFormat}
+                      onChange={(e) => setPref('numberFormat', e.target.value)}
+                    >
+                      <option value="en-US">1,234,567.89</option>
+                      <option value="de-DE">1.234.567,89</option>
+                      <option value="en-IN">12,34,567.89</option>
+                    </Select>
+                    <Select
+                      label="Table Density"
+                      value={prefs.density}
+                      onChange={(e) => setPref('density', e.target.value)}
+                    >
+                      <option value="comfortable">Comfortable</option>
+                      <option value="compact">Compact</option>
+                    </Select>
+                  </div>
+                </Card>
+              )}
 
-              <Card>
-                <CardHeader
-                  title="Two-Factor Authentication"
-                  subtitle="Add an extra layer of security to your account"
-                  action={<Badge tone="warning" dot>Disabled</Badge>}
-                />
-                <div className="mt-4">
-                  <Button
-                    variant="outline"
-                    leftIcon={<ShieldCheck className="h-4 w-4" />}
-                    onClick={() => toast({ tone: 'info', title: '2FA setup coming soon' })}
-                  >
-                    Enable 2FA
-                  </Button>
-                </div>
-              </Card>
+              {section === 'notifications' && notifications && (
+                <Card>
+                  <CardHeader title="Notifications" subtitle="Choose what we email you about" />
+                  <div className="mt-4 divide-y divide-border">
+                    <ToggleRow
+                      label="Trade alerts"
+                      description="Confirmations when orders execute across accounts."
+                      checked={notifications.tradeAlerts}
+                      onChange={() => toggleNotif('tradeAlerts')}
+                    />
+                    <ToggleRow
+                      label="Price targets"
+                      description="Notify when a watchlist idea hits its target price."
+                      checked={notifications.priceTargets}
+                      onChange={() => toggleNotif('priceTargets')}
+                    />
+                    <ToggleRow
+                      label="Weekly digest"
+                      description="A Monday summary of performance and activity."
+                      checked={notifications.weeklyDigest}
+                      onChange={() => toggleNotif('weeklyDigest')}
+                    />
+                    <ToggleRow
+                      label="Corporate actions"
+                      description="Upcoming dividends, earnings, splits, and AGMs."
+                      checked={notifications.corporateActions}
+                      onChange={() => toggleNotif('corporateActions')}
+                    />
+                    <ToggleRow
+                      label="Product updates"
+                      description="Occasional news about new DS Advisory features."
+                      checked={notifications.productUpdates}
+                      onChange={() => toggleNotif('productUpdates')}
+                    />
+                  </div>
+                </Card>
+              )}
 
-              <Card>
-                <CardHeader title="Active Sessions" subtitle="Devices currently signed in" />
-                <div className="mt-4 space-y-1">
-                  <SessionRow device="Chrome · Windows" location="This device" current />
-                  <SessionRow device="Safari · iPhone" location="Mumbai, IN · 2 days ago" />
+              {section === 'security' && (
+                <div className="space-y-6">
+                  <Card>
+                    <CardHeader title="Password" subtitle="Update your account password" />
+                    <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+                      <Input
+                        label="Current Password"
+                        type="password"
+                        autoComplete="current-password"
+                        leftIcon={<KeyRound className="h-4 w-4" />}
+                        placeholder="••••••••"
+                        value={pw.current}
+                        error={pwErrors.current || undefined}
+                        onChange={(e) => setPw((p) => ({ ...p, current: e.target.value }))}
+                      />
+                      <div className="hidden md:block" />
+                      <Input
+                        label="New Password"
+                        type="password"
+                        autoComplete="new-password"
+                        leftIcon={<KeyRound className="h-4 w-4" />}
+                        placeholder="••••••••"
+                        value={pw.next}
+                        error={pwErrors.next || undefined}
+                        onChange={(e) => setPw((p) => ({ ...p, next: e.target.value }))}
+                      />
+                      <Input
+                        label="Confirm New Password"
+                        type="password"
+                        autoComplete="new-password"
+                        leftIcon={<KeyRound className="h-4 w-4" />}
+                        placeholder="••••••••"
+                        value={pw.confirm}
+                        error={pwErrors.confirm || undefined}
+                        onChange={(e) => setPw((p) => ({ ...p, confirm: e.target.value }))}
+                      />
+                    </div>
+                    <div className="mt-5">
+                      <Button
+                        variant="outline"
+                        loading={pwSaving}
+                        leftIcon={<ShieldCheck className="h-4 w-4" />}
+                        onClick={changePassword}
+                      >
+                        Update password
+                      </Button>
+                    </div>
+                  </Card>
+
+                  <Card>
+                    <CardHeader
+                      title="Two-Factor Authentication"
+                      subtitle="Add an extra layer of security to your account"
+                      action={<Badge tone="warning" dot>Disabled</Badge>}
+                    />
+                    <div className="mt-4">
+                      <Button
+                        variant="outline"
+                        leftIcon={<ShieldCheck className="h-4 w-4" />}
+                        onClick={() => toast({ tone: 'info', title: '2FA setup coming soon' })}
+                      >
+                        Enable 2FA
+                      </Button>
+                    </div>
+                  </Card>
+
+                  <Card>
+                    <CardHeader title="Active Sessions" subtitle="Devices currently signed in" />
+                    <div className="mt-4 space-y-1">
+                      <SessionRow device="Chrome · Windows" location="This device" current />
+                      <SessionRow device="Safari · iPhone" location="Mumbai, IN · 2 days ago" />
+                    </div>
+                  </Card>
                 </div>
-              </Card>
-            </div>
+              )}
+            </>
           )}
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function SettingsSkeleton() {
+  return (
+    <Card>
+      <Skeleton className="h-5 w-32" />
+      <Skeleton className="mt-2 h-4 w-64" />
+      <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="space-y-2">
+            <Skeleton className="h-3.5 w-24" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -294,6 +528,7 @@ function ToggleRow({
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         onClick={onChange}
         className={cn(
           'relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer items-center rounded-full p-[2px] transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2',
