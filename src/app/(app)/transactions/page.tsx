@@ -319,8 +319,7 @@ export default function TransactionsPage() {
                   </Button>
                 </>
       ),
-    },
-    []
+    }
   );
 
   return (

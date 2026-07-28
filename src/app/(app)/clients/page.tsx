@@ -49,8 +49,7 @@ export default function ClientsPage() {
           Add Client
         </Button>
       ),
-    },
-    [router]
+    }
   );
 
   useEffect(() => {

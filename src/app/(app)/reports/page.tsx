@@ -161,8 +161,7 @@ export default function ReportsPage() {
                   Schedule
                 </Button>
       ),
-    },
-    [toast]
+    }
   );
 
   return (

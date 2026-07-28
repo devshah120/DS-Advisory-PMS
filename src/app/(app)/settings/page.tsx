@@ -276,8 +276,7 @@ export default function SettingsPage() {
                   </Button>
                 )
       ),
-    },
-    [section, saving, loading, dirty, save]
+    }
   );
 
   return (

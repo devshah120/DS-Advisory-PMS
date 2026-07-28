@@ -140,8 +140,7 @@ export default function PerformancePage() {
                   </Button>
                 </>
       ),
-    },
-    [clients, clientId, result, refreshing, load]
+    }
   );
 
   return (

@@ -1024,8 +1024,7 @@ export default function HoldingsPage() {
                   </Button>
                 </div>
       ),
-    },
-    [openImport]
+    }
   );
 
   return (

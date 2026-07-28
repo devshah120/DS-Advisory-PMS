@@ -274,8 +274,7 @@ export default function FundamentalsPage() {
           </Button>
         </div>
       ),
-    },
-    [strategies, strategy, refreshing, handleRefresh]
+    }
   );
 
   return (

@@ -40,7 +40,11 @@ function AppShellInner({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { title, subtitle, actions } = usePageHeader();
+  // `title`/`subtitle` come from state so a change re-renders the shell;
+  // `actions` is read live so the buttons always hold the page's current
+  // handlers rather than the ones captured when the heading last changed.
+  const { title, subtitle, ref: headingRef } = usePageHeader();
+  const actions = headingRef.current.actions;
   const [ready, setReady] = useState(!requireAuth);
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
