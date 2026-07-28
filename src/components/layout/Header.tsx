@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { clientsApi } from '@/lib/clients.api';
+import { usersApi, type UserProfile } from '@/lib/users.api';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/types';
 
@@ -37,6 +38,23 @@ const crumbLabels: Record<string, string> = {
   auth: 'Account',
 };
 
+/**
+ * Avatar initials for the signed-in user — "Dev Shah" becomes "DS".
+ *
+ * Falls back to the email's first letter for accounts whose names haven't been
+ * filled in, and to a neutral dash while the profile is still loading, so the
+ * avatar never briefly displays someone else's initials.
+ */
+function initials(profile: UserProfile | null) {
+  if (!profile) return '—';
+
+  const letters = [profile.firstName, profile.lastName]
+    .map((part) => part?.trim()?.[0] ?? '')
+    .join('');
+
+  return (letters || profile.email?.[0] || '?').toUpperCase();
+}
+
 const notifications = [
   { icon: TrendingUp, tone: 'text-success', title: 'NVDA up 4.2% today', time: '12m ago' },
   { icon: CircleDollarSign, tone: 'text-brand', title: 'Dividend credited — $3,200', time: '1h ago' },
@@ -49,6 +67,22 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    usersApi
+      .getProfile()
+      .then((p) => {
+        if (active) setProfile(p);
+      })
+      // The avatar falls back to a neutral placeholder, so a failure here isn't
+      // worth a toast — it would fire on every page with the header mounted.
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -57,7 +91,6 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
       .then((list) => {
         if (!active) return;
         setClients(list);
-        setWorkspaceId((prev) => prev ?? list[0]?.id ?? null);
       })
       .catch(() => {
         /* leave the switcher empty if clients can't be loaded */
@@ -120,10 +153,19 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
           onClick: () => setWorkspaceId(c.id),
         }))}
         trigger={
-          <button className="hidden h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2 lg:flex">
-            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-brand to-brand-active text-2xs font-bold text-white">
-              {workspaceName.charAt(0)}
-            </span>
+          <button
+            className={cn(
+              'hidden h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium transition-colors hover:bg-surface-2 lg:flex',
+              // Muted until a client is chosen, so the prompt reads as a
+              // placeholder rather than as a selected value.
+              workspace ? 'text-ink' : 'text-ink-secondary'
+            )}
+          >
+            {workspace && (
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-brand to-brand-active text-2xs font-bold text-white">
+                {workspace.name.charAt(0)}
+              </span>
+            )}
             <span className="max-w-[140px] truncate">{workspaceName}</span>
             <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
           </button>
@@ -198,14 +240,21 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
       <Dropdown
         width={220}
         items={[
-          { label: 'Profile settings', icon: <Settings className="h-4 w-4" />, onClick: () => {} },
+          {
+            label: 'Profile settings',
+            icon: <Settings className="h-4 w-4" />,
+            onClick: () => router.push('/settings'),
+          },
           { divider: true, label: '' },
           { label: 'Sign out', icon: <LogOut className="h-4 w-4" />, tone: 'danger', onClick: onLogout },
         ]}
         trigger={
-          <button className="flex items-center gap-2 rounded-[10px] p-1 pr-1.5 transition-colors hover:bg-surface-3">
+          <button
+            className="flex items-center gap-2 rounded-[10px] p-1 pr-1.5 transition-colors hover:bg-surface-3"
+            title={profile ? `${profile.firstName} ${profile.lastName}` : undefined}
+          >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-active text-[13px] font-semibold text-white">
-              DU
+              {initials(profile)}
             </span>
             <ChevronDown className="hidden h-3.5 w-3.5 text-ink-tertiary sm:block" />
           </button>
