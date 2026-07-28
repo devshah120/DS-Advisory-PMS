@@ -3,16 +3,18 @@
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useToast } from '@/components/ui';
 import ClientForm, { emptyClientForm } from '@/components/clients/ClientForm';
 
 export default function AddClientPage() {
+  usePageHeading({ title: "New Client", subtitle: "Onboard a new mandate to the platform" });
+
   const router = useRouter();
   const { toast } = useToast();
 
   return (
-    <AppShell title="New Client" subtitle="Onboard a new mandate to the platform">
+    <>
       <div className="mx-auto max-w-3xl">
         <button
           onClick={() => router.back()}
@@ -36,6 +38,6 @@ export default function AddClientPage() {
           }}
         />
       </div>
-    </AppShell>
+    </>
   );
 }

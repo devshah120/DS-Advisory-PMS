@@ -29,7 +29,7 @@ import {
   cn,
 } from '@/lib/utils';
 import { Holding, Client } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import {
   Card,
   Tabs,
@@ -1006,25 +1006,30 @@ export default function HoldingsPage() {
     },
   ];
 
-  return (
-    <AppShell
-      title="Holdings & Allocations"
-      subtitle="Consolidated positions across every managed account"
-      actions={
+  usePageHeading(
+    {
+      title: "Holdings & Allocations",
+      subtitle: "Consolidated positions across every managed account",
+      actions: (
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            leftIcon={<Upload className="h-4 w-4" />}
-            onClick={openImport}
-          >
-            Bulk Import
-          </Button>
-          <Button leftIcon={<Tag className="h-4 w-4" />} onClick={() => (window.location.href = '/symbols/add')}>
-            Add Position
-          </Button>
-        </div>
-      }
-    >
+                  <Button
+                    variant="secondary"
+                    leftIcon={<Upload className="h-4 w-4" />}
+                    onClick={openImport}
+                  >
+                    Bulk Import
+                  </Button>
+                  <Button leftIcon={<Tag className="h-4 w-4" />} onClick={() => (window.location.href = '/symbols/add')}>
+                    Add Position
+                  </Button>
+                </div>
+      ),
+    },
+    [openImport]
+  );
+
+  return (
+    <>
       <div className="space-y-6">
         {/* Summary */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -1529,7 +1534,7 @@ export default function HoldingsPage() {
           )}
         </div>
       </Modal>
-    </AppShell>
+    </>
   );
 }
 

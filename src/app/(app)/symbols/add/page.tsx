@@ -20,7 +20,7 @@ import {
   formatSignedPct,
   cn,
 } from '@/lib/utils';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, CardHeader, Input, Select, Button, useToast } from '@/components/ui';
 
 const initial = {
@@ -56,6 +56,8 @@ type LookupStatus = 'idle' | 'loading' | 'found' | 'notfound' | 'error';
 const DEBOUNCE_MS = 500;
 
 export default function AddSymbolPage() {
+  usePageHeading({ title: "Add Position", subtitle: "Record a new holding for a client account" });
+
   const router = useRouter();
   const { toast } = useToast();
   const [form, setForm] = useState<FormState>(initial);
@@ -216,7 +218,7 @@ export default function AddSymbolPage() {
           : undefined;
 
   return (
-    <AppShell title="Add Position" subtitle="Record a new holding for a client account">
+    <>
       <button
         onClick={() => router.back()}
         className="mb-5 inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-secondary transition-colors hover:text-ink"
@@ -463,7 +465,7 @@ export default function AddSymbolPage() {
           </div>
         </div>
       </form>
-    </AppShell>
+    </>
   );
 }
 

@@ -15,7 +15,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { parseApiError } from '@/lib/clients.api';
 import {
   usersApi,
@@ -260,23 +260,28 @@ export default function SettingsPage() {
     }
   };
 
-  return (
-    <AppShell
-      title="Settings"
-      subtitle="Manage your profile, preferences, and security"
-      actions={
+  usePageHeading(
+    {
+      title: "Settings",
+      subtitle: "Manage your profile, preferences, and security",
+      actions: (
         section === 'security' ? undefined : (
-          <Button
-            loading={saving}
-            disabled={loading || !dirty}
-            leftIcon={<Check className="h-4 w-4" />}
-            onClick={save}
-          >
-            Save changes
-          </Button>
-        )
-      }
-    >
+                  <Button
+                    loading={saving}
+                    disabled={loading || !dirty}
+                    leftIcon={<Check className="h-4 w-4" />}
+                    onClick={save}
+                  >
+                    Save changes
+                  </Button>
+                )
+      ),
+    },
+    [section, saving, loading, dirty, save]
+  );
+
+  return (
+    <>
       <div className="space-y-6">
         <Tabs
           tabs={[
@@ -516,7 +521,7 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }
 

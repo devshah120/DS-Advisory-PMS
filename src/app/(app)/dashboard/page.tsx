@@ -5,11 +5,13 @@ import { Landmark, Users, TrendingUp, TrendingDown, Briefcase, PiggyBank } from 
 import { dashboardApi } from '@/lib/dashboard.api';
 import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/lib/utils';
 import { DashboardOverview, MarketQuote, HoldingMover } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
 import { SectorPieChart, TopHoldingsList } from '@/components/charts';
 
 export default function DashboardPage() {
+  usePageHeading({ title: "Portfolio Overview", subtitle: "Consolidated performance across all managed accounts" });
+
   const { toast } = useToast();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
@@ -46,7 +48,7 @@ export default function DashboardPage() {
   const commodities = market.slice(4);
 
   return (
-    <AppShell title="Portfolio Overview" subtitle="Consolidated performance across all managed accounts">
+    <>
       <div className="space-y-6">
         {/* ---- KPI row ---- */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -158,7 +160,7 @@ export default function DashboardPage() {
           </div>
         </Card>
       </div>
-    </AppShell>
+    </>
   );
 }
 

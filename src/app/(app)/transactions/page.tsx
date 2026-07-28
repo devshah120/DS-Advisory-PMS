@@ -7,7 +7,7 @@ import { clientsApi } from '@/lib/clients.api';
 import { transactionsApi } from '@/lib/transactions.api';
 import { formatCurrency, formatCompactCurrency, cn } from '@/lib/utils';
 import { Transaction, Client, TransactionType } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { CashFlowModal } from '@/components/transactions/CashFlowModal';
 import { DividendModal } from '@/components/transactions/DividendModal';
 import { GroupedByDate } from '@/components/transactions/GroupedByDate';
@@ -291,35 +291,40 @@ export default function TransactionsPage() {
     },
   ];
 
-  return (
-    <AppShell
-      title="Transactions"
-      subtitle="Trade and cash activity across every managed account"
-      actions={
+  usePageHeading(
+    {
+      title: "Transactions",
+      subtitle: "Trade and cash activity across every managed account",
+      actions: (
         <>
-          <Button
-            variant="outline"
-            leftIcon={<Coins className="h-4 w-4" />}
-            onClick={() => setDividendModalOpen(true)}
-          >
-            Dividend
-          </Button>
-          <Button
-            variant="outline"
-            leftIcon={<Wallet className="h-4 w-4" />}
-            onClick={() => setFlowModalOpen(true)}
-          >
-            Set Cash
-          </Button>
-          <Button
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => router.push('/symbols/add')}
-          >
-            Trade
-          </Button>
-        </>
-      }
-    >
+                  <Button
+                    variant="outline"
+                    leftIcon={<Coins className="h-4 w-4" />}
+                    onClick={() => setDividendModalOpen(true)}
+                  >
+                    Dividend
+                  </Button>
+                  <Button
+                    variant="outline"
+                    leftIcon={<Wallet className="h-4 w-4" />}
+                    onClick={() => setFlowModalOpen(true)}
+                  >
+                    Set Cash
+                  </Button>
+                  <Button
+                    leftIcon={<Plus className="h-4 w-4" />}
+                    onClick={() => router.push('/symbols/add')}
+                  >
+                    Trade
+                  </Button>
+                </>
+      ),
+    },
+    []
+  );
+
+  return (
+    <>
       <div className="space-y-6">
         {/* Summary — the flows tab answers a different question, so it gets its own row. */}
         {view === 'flows' ? (
@@ -453,7 +458,7 @@ export default function TransactionsPage() {
           setView('income');
         }}
       />
-    </AppShell>
+    </>
   );
 }
 

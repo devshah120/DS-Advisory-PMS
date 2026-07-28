@@ -25,7 +25,7 @@ import {
   formatCurrency,
   formatSignedCurrency,
 } from '@/lib/utils';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import {
   Badge,
   Button,
@@ -95,54 +95,57 @@ export default function PerformancePage() {
     [clients, clientId],
   );
 
-  return (
-    <AppShell
-      title="Performance"
-      subtitle={
-        result
-          ? result.meta.method
-          : 'Money-weighted returns, benchmark comparison and attribution'
-      }
-      actions={
+  usePageHeading(
+    {
+      title: "Performance",
+      subtitle: result
+                ? result.meta.method
+                : 'Money-weighted returns, benchmark comparison and attribution',
+      actions: (
         <>
-          {clients && clients.length > 0 && (
-            <Select
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              aria-label="Client"
-            >
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          )}
-          <Button
-            variant="outline"
-            size="md"
-            leftIcon={<Download className="h-4 w-4" />}
-            disabled={!result || result.data.status !== 'ok'}
-            onClick={() => result && exportSheet(result)}
-          >
-            Export
-          </Button>
-          <Button
-            size="md"
-            leftIcon={
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-            }
-            disabled={!clientId || refreshing}
-            onClick={() => {
-              setRefreshing(true);
-              load(clientId);
-            }}
-          >
-            Refresh
-          </Button>
-        </>
-      }
-    >
+                  {clients && clients.length > 0 && (
+                    <Select
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                      aria-label="Client"
+                    >
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="md"
+                    leftIcon={<Download className="h-4 w-4" />}
+                    disabled={!result || result.data.status !== 'ok'}
+                    onClick={() => result && exportSheet(result)}
+                  >
+                    Export
+                  </Button>
+                  <Button
+                    size="md"
+                    leftIcon={
+                      <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+                    }
+                    disabled={!clientId || refreshing}
+                    onClick={() => {
+                      setRefreshing(true);
+                      load(clientId);
+                    }}
+                  >
+                    Refresh
+                  </Button>
+                </>
+      ),
+    },
+    [clients, clientId, result, refreshing, load]
+  );
+
+  return (
+    <>
       {loading ? (
         <SheetSkeleton />
       ) : !clients?.length ? (
@@ -158,7 +161,7 @@ export default function PerformancePage() {
       ) : (
         <Sheet result={result} clientName={client?.name ?? ''} />
       )}
-    </AppShell>
+    </>
   );
 }
 

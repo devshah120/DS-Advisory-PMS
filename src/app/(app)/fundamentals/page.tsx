@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react';
 import { fundamentalsApi } from '@/lib/fundamentals.api';
 import { formatCompactCurrency, formatSignedPct, formatDate, cn } from '@/lib/utils';
 import { FundamentalView } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Button, DataTable, useToast, type Column } from '@/components/ui';
 import { ScoreHoverCard } from './ScoreHoverCard';
 
@@ -242,11 +242,12 @@ export default function FundamentalsPage() {
     [],
   );
 
-  return (
-    <AppShell
-      title="Fundamentals"
-      subtitle="Atlas Fundamental Score — Growth At Reasonable Price, scored against a configurable rules engine"
-      actions={
+  usePageHeading(
+    {
+      title: 'Fundamentals',
+      subtitle:
+        'Atlas Fundamental Score — Growth At Reasonable Price, scored against a configurable rules engine',
+      actions: (
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-[10px] border border-border bg-surface-2 p-1">
             {strategies.map((s) => (
@@ -272,8 +273,13 @@ export default function FundamentalsPage() {
             Refresh
           </Button>
         </div>
-      }
-    >
+      ),
+    },
+    [strategies, strategy, refreshing, handleRefresh]
+  );
+
+  return (
+    <>
       <DataTable
         columns={columns}
         data={rows}
@@ -285,6 +291,6 @@ export default function FundamentalsPage() {
         emptyTitle="No fundamentals data yet"
         emptyDescription="Add tickers to a client's holdings or a watchlist, then click Refresh to pull fundamentals for them."
       />
-    </AppShell>
+    </>
   );
 }

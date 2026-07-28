@@ -4,11 +4,13 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Skeleton, useToast } from '@/components/ui';
 import ClientForm, { ClientFormValues } from '@/components/clients/ClientForm';
 
 export default function EditClientPage() {
+  usePageHeading({ title: "Edit Client", subtitle: "Update this mandate's details" });
+
   return (
     <Suspense fallback={null}>
       <EditClientPageInner />
@@ -63,7 +65,7 @@ function EditClientPageInner() {
   }, [id]);
 
   return (
-    <AppShell title="Edit Client" subtitle="Update this mandate's details">
+    <>
       <div className="mx-auto max-w-3xl">
         <button
           onClick={() => router.back()}
@@ -103,6 +105,6 @@ function EditClientPageInner() {
           />
         )}
       </div>
-    </AppShell>
+    </>
   );
 }

@@ -16,7 +16,7 @@ import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
 import { downloadClientFeeWorkbook } from '@/lib/feeExport';
 import { ClientFeeRow } from '@/types/reports';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, CardHeader, Badge, Button, useToast } from '@/components/ui';
 
 interface ReportTemplate {
@@ -148,20 +148,25 @@ export default function ReportsPage() {
 
   const totalFeeAmount = fees.reduce((sum, f) => sum + f.feeAmount, 0);
 
-  return (
-    <AppShell
-      title="Reports"
-      subtitle="Generate, schedule, and download portfolio reports"
-      actions={
+  usePageHeading(
+    {
+      title: "Reports",
+      subtitle: "Generate, schedule, and download portfolio reports",
+      actions: (
         <Button
-          variant="outline"
-          leftIcon={<CalendarClock className="h-4 w-4" />}
-          onClick={() => toast({ tone: 'info', title: 'Scheduling coming soon' })}
-        >
-          Schedule
-        </Button>
-      }
-    >
+                  variant="outline"
+                  leftIcon={<CalendarClock className="h-4 w-4" />}
+                  onClick={() => toast({ tone: 'info', title: 'Scheduling coming soon' })}
+                >
+                  Schedule
+                </Button>
+      ),
+    },
+    [toast]
+  );
+
+  return (
+    <>
       <div className="space-y-6">
         {/* Templates */}
         <div>
@@ -343,6 +348,6 @@ export default function ReportsPage() {
           </table>
         </Card>
       </div>
-    </AppShell>
+    </>
   );
 }

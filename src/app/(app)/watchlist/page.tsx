@@ -6,7 +6,7 @@ import { watchlistApi } from '@/lib/watchlist.api';
 import { marketApi, SymbolNotFoundError } from '@/lib/market.api';
 import { formatCurrency, formatSignedPct, cn } from '@/lib/utils';
 import { Watchlist, WatchlistReturns, BenchmarkReturns, WatchlistFolder, WatchlistSlot } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, Input, Button, Tabs, Modal, Textarea, useToast } from '@/components/ui';
 
 type LookupStatus = 'idle' | 'loading' | 'found' | 'notfound' | 'error';
@@ -18,6 +18,8 @@ type SortKey = 'mtd' | 'qtd' | 'ytd';
 type SortDir = 'asc' | 'desc';
 
 export default function WatchlistPage() {
+  usePageHeading({ title: "Watchlist", subtitle: "Tickers under watch, with MTD / QTD / YTD performance vs. benchmarks" });
+
   const { toast } = useToast();
   const [slot, setSlot] = useState<WatchlistSlot>('1');
   const [folders, setFolders] = useState<WatchlistFolder[]>(SLOTS.map((s) => ({ slot: s, name: `Watchlist ${s}` })));
@@ -268,7 +270,7 @@ export default function WatchlistPage() {
   };
 
   return (
-    <AppShell title="Watchlist" subtitle="Tickers under watch, with MTD / QTD / YTD performance vs. benchmarks">
+    <>
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Tabs
@@ -446,7 +448,7 @@ export default function WatchlistPage() {
           className="font-mono uppercase"
         />
       </Modal>
-    </AppShell>
+    </>
   );
 }
 

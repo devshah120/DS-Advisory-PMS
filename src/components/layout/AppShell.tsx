@@ -1,27 +1,46 @@
 'use client';
 
 import { ReactNode, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { apiClient } from '@/lib/api';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { CommandPalette } from './CommandPalette';
+import { PageHeaderProvider, usePageHeader } from './PageHeaderContext';
 
+/**
+ * The persistent application chrome: sidebar, header, command palette.
+ *
+ * Rendered once by the (app) route-group layout and kept mounted across
+ * navigation, so the Header no longer refetches the profile and client list on
+ * every menu click. Pages declare their own heading with `usePageHeading`
+ * instead of wrapping themselves in this component.
+ */
 export default function AppShell({
   children,
-  title,
-  subtitle,
-  actions,
   requireAuth = true,
 }: {
   children: ReactNode;
-  title?: string;
-  subtitle?: string;
-  actions?: ReactNode;
   requireAuth?: boolean;
 }) {
+  return (
+    <PageHeaderProvider>
+      <AppShellInner requireAuth={requireAuth}>{children}</AppShellInner>
+    </PageHeaderProvider>
+  );
+}
+
+function AppShellInner({
+  children,
+  requireAuth,
+}: {
+  children: ReactNode;
+  requireAuth: boolean;
+}) {
   const router = useRouter();
+  const pathname = usePathname();
+  const { title, subtitle, actions } = usePageHeader();
   const [ready, setReady] = useState(!requireAuth);
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -111,7 +130,10 @@ export default function AppShell({
                 {actions && <div className="flex items-center gap-3">{actions}</div>}
               </div>
             )}
+            {/* Keyed on the route so the enter animation replays per page — it
+                used to come free with the remount this layout now avoids. */}
             <motion.div
+              key={pathname}
               className="min-w-0"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}

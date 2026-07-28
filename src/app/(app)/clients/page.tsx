@@ -11,7 +11,7 @@ import {
   cn,
 } from '@/lib/utils';
 import { Client, RiskProfile, ClientStatus } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import {
   Card,
   Badge,
@@ -39,6 +39,19 @@ export default function ClientsPage() {
   const { toast } = useToast();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+
+  usePageHeading(
+    {
+      title: 'Clients',
+      subtitle: 'Mandates and accounts under management',
+      actions: (
+        <Button leftIcon={<Plus className="h-4 w-4" />} onClick={() => router.push('/clients/add')}>
+          Add Client
+        </Button>
+      ),
+    },
+    [router]
+  );
 
   useEffect(() => {
     (async () => {
@@ -195,15 +208,7 @@ export default function ClientsPage() {
   ];
 
   return (
-    <AppShell
-      title="Clients"
-      subtitle="Mandates and accounts under management"
-      actions={
-        <Button leftIcon={<Plus className="h-4 w-4" />} onClick={() => router.push('/clients/add')}>
-          Add Client
-        </Button>
-      }
-    >
+    <>
       <div className="space-y-6">
         {/* Summary */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -233,7 +238,7 @@ export default function ClientsPage() {
           emptyDescription="Onboard your first mandate to get started."
         />
       </div>
-    </AppShell>
+    </>
   );
 }
 

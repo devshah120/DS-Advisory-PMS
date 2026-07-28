@@ -5,7 +5,7 @@ import { TrendingUp, Coins, Split, RefreshCw } from 'lucide-react';
 import { eventsApi } from '@/lib/events.api';
 import { formatDate, cn } from '@/lib/utils';
 import { PortfolioEvent, PortfolioEventType } from '@/types';
-import AppShell from '@/components/layout/AppShell';
+import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Badge, Button, DataTable, useToast, type Column } from '@/components/ui';
 import { exportToCsv } from '@/components/ui';
 
@@ -26,6 +26,12 @@ const TYPE_FILTERS: Array<{ value: PortfolioEventType | 'ALL'; label: string }> 
 ];
 
 export default function EventCenterPage() {
+  usePageHeading({
+    title: 'Event Center',
+    subtitle:
+      'Upcoming earnings, dividends, and corporate actions across every holding',
+  });
+
   const { toast } = useToast();
   const [events, setEvents] = useState<PortfolioEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,10 +140,7 @@ export default function EventCenterPage() {
   ];
 
   return (
-    <AppShell
-      title="Event Center"
-      subtitle="Upcoming earnings, dividends, and corporate actions across every holding"
-    >
+    <>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-2">
@@ -194,6 +197,6 @@ export default function EventCenterPage() {
           emptyDescription="Nothing in the next ~60 days for tickers currently held across your clients."
         />
       </div>
-    </AppShell>
+    </>
   );
 }
