@@ -244,7 +244,19 @@ class APIClient {
       async (error) => {
         const originalRequest = error.config;
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        // A 401 from the sign-in routes means "those credentials were wrong",
+        // not "this session expired". Refreshing here would be nonsense — and
+        // with a stale token still in localStorage it would redirect away from
+        // the login page mid-attempt, wiping the error the user needs to see.
+        const isAuthAttempt = /\/auth\/(login|refresh)/.test(
+          originalRequest?.url || ''
+        );
+
+        if (
+          error.response?.status === 401 &&
+          !originalRequest._retry &&
+          !isAuthAttempt
+        ) {
           originalRequest._retry = true;
 
           if (this.refreshToken) {
@@ -299,6 +311,15 @@ class APIClient {
 
   getClient() {
     return this.client;
+  }
+
+  /**
+   * The refresh token identifying this device. Sent to the sessions endpoints
+   * so the server can mark which row is "this device" and spare it from
+   * "sign out everywhere" — it never authorizes a request on its own.
+   */
+  getRefreshToken() {
+    return this.refreshToken;
   }
 }
 

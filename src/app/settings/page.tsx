@@ -6,9 +6,13 @@ import {
   Mail,
   Building2,
   ShieldCheck,
+  ShieldOff,
   Check,
   KeyRound,
   Monitor,
+  Smartphone,
+  RefreshCw,
+  LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AppShell from '@/components/layout/AppShell';
@@ -19,6 +23,12 @@ import {
   type UserPreferences,
   type UserProfile,
 } from '@/lib/users.api';
+import {
+  securityApi,
+  type ActiveSession,
+  type TwoFactorStatus,
+} from '@/lib/security.api';
+import { TwoFactorSetupModal } from '@/components/settings/TwoFactorSetupModal';
 import type { UserRole } from '@/types';
 import {
   Card,
@@ -29,6 +39,7 @@ import {
   Badge,
   Tabs,
   Skeleton,
+  Modal,
   useToast,
 } from '@/components/ui';
 
@@ -86,6 +97,14 @@ export default function SettingsPage() {
   const [pwErrors, setPwErrors] = useState<Record<string, string>>({});
   const [pwSaving, setPwSaving] = useState(false);
 
+  // Security tab state. Loaded separately from the three form tabs: it isn't
+  // part of the dirty/save cycle (every action here commits immediately), and
+  // it only matters once the user actually opens that tab.
+  const [twoFactor, setTwoFactor] = useState<TwoFactorStatus | null>(null);
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
+  const [securityLoading, setSecurityLoading] = useState(true);
+  const [securityError, setSecurityError] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
@@ -112,6 +131,29 @@ export default function SettingsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadSecurity = useCallback(async () => {
+    setSecurityLoading(true);
+    setSecurityError('');
+    try {
+      const [status, list] = await Promise.all([
+        securityApi.getTwoFactorStatus(),
+        securityApi.getSessions(),
+      ]);
+      setTwoFactor(status);
+      setSessions(list);
+    } catch (err) {
+      setSecurityError(parseApiError(err).message);
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, []);
+
+  // Deferred until the tab is actually opened — no reason to spend two requests
+  // on it for the majority of visits, which are to Profile.
+  useEffect(() => {
+    if (section === 'security') loadSecurity();
+  }, [section, loadSecurity]);
 
   const setP = (k: keyof ProfileForm, v: string) => {
     setProfile((p) => ({ ...p, [k]: v }));
@@ -456,30 +498,18 @@ export default function SettingsPage() {
                     </div>
                   </Card>
 
-                  <Card>
-                    <CardHeader
-                      title="Two-Factor Authentication"
-                      subtitle="Add an extra layer of security to your account"
-                      action={<Badge tone="warning" dot>Disabled</Badge>}
-                    />
-                    <div className="mt-4">
-                      <Button
-                        variant="outline"
-                        leftIcon={<ShieldCheck className="h-4 w-4" />}
-                        onClick={() => toast({ tone: 'info', title: '2FA setup coming soon' })}
-                      >
-                        Enable 2FA
-                      </Button>
-                    </div>
-                  </Card>
+                  <TwoFactorCard
+                    status={twoFactor}
+                    loading={securityLoading}
+                    onChanged={loadSecurity}
+                  />
 
-                  <Card>
-                    <CardHeader title="Active Sessions" subtitle="Devices currently signed in" />
-                    <div className="mt-4 space-y-1">
-                      <SessionRow device="Chrome · Windows" location="This device" current />
-                      <SessionRow device="Safari · iPhone" location="Mumbai, IN · 2 days ago" />
-                    </div>
-                  </Card>
+                  <SessionsCard
+                    sessions={sessions}
+                    loading={securityLoading}
+                    error={securityError}
+                    onReload={loadSecurity}
+                  />
                 </div>
               )}
             </>
@@ -546,32 +576,361 @@ function ToggleRow({
   );
 }
 
-function SessionRow({
-  device,
-  location,
-  current,
+/** "2 days ago" / "just now" — matches the tone the mock rows used. */
+function relativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function TwoFactorCard({
+  status,
+  loading,
+  onChanged,
 }: {
-  device: string;
-  location: string;
-  current?: boolean;
+  status: TwoFactorStatus | null;
+  loading: boolean;
+  onChanged: () => void;
 }) {
+  const { toast } = useToast();
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // One dialog serves both password-gated actions; this says which is running.
+  const [intent, setIntent] = useState<'disable' | 'regenerate'>('disable');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [newCodes, setNewCodes] = useState<string[]>([]);
+
+  const enabled = status?.enabled ?? false;
+
+  const openConfirm = (next: 'disable' | 'regenerate') => {
+    setIntent(next);
+    setPassword('');
+    setError('');
+    setNewCodes([]);
+    setConfirmOpen(true);
+  };
+
+  const submit = async () => {
+    if (!password) {
+      setError('Enter your password to confirm');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      if (intent === 'disable') {
+        await securityApi.disableTwoFactor(password);
+        setConfirmOpen(false);
+        toast({ tone: 'success', title: 'Two-factor authentication disabled' });
+        onChanged();
+      } else {
+        const res = await securityApi.regenerateRecoveryCodes(password);
+        // Keep the dialog open — these codes are shown exactly once.
+        setNewCodes(res.recoveryCodes);
+        setPassword('');
+        onChanged();
+      }
+    } catch (err) {
+      setError(parseApiError(err).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader
+          title="Two-Factor Authentication"
+          subtitle="Add an extra layer of security to your account"
+          action={
+            loading ? (
+              <Skeleton className="h-6 w-20" />
+            ) : enabled ? (
+              <Badge tone="success" dot>
+                Enabled
+              </Badge>
+            ) : (
+              <Badge tone="warning" dot>
+                Disabled
+              </Badge>
+            )
+          }
+        />
+
+        {!loading && enabled && (
+          <p className="mt-3 text-[13px] text-ink-secondary">
+            You&apos;ll be asked for a code from your authenticator app each time you
+            sign in.{' '}
+            {status && status.recoveryCodesRemaining > 0 ? (
+              <>
+                {status.recoveryCodesRemaining} recovery code
+                {status.recoveryCodesRemaining === 1 ? '' : 's'} remaining.
+              </>
+            ) : (
+              <span className="text-warning">
+                No recovery codes left — generate a new set.
+              </span>
+            )}
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {enabled ? (
+            <>
+              <Button
+                variant="outline"
+                leftIcon={<RefreshCw className="h-4 w-4" />}
+                disabled={loading}
+                onClick={() => openConfirm('regenerate')}
+              >
+                Regenerate recovery codes
+              </Button>
+              <Button
+                variant="ghost"
+                leftIcon={<ShieldOff className="h-4 w-4" />}
+                disabled={loading}
+                onClick={() => openConfirm('disable')}
+              >
+                Disable 2FA
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              leftIcon={<ShieldCheck className="h-4 w-4" />}
+              disabled={loading}
+              onClick={() => setSetupOpen(true)}
+            >
+              Enable 2FA
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      <TwoFactorSetupModal
+        isOpen={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        onEnabled={onChanged}
+      />
+
+      <Modal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={
+          intent === 'disable'
+            ? 'Disable two-factor authentication'
+            : 'Generate new recovery codes'
+        }
+        description={
+          newCodes.length
+            ? 'Your previous codes no longer work. Save these somewhere safe.'
+            : intent === 'disable'
+              ? 'Your account will be protected by your password alone. Enter it to confirm.'
+              : 'This replaces every unused code. Enter your password to confirm.'
+        }
+        footer={
+          newCodes.length ? (
+            <Button onClick={() => setConfirmOpen(false)}>
+              I&apos;ve saved these codes
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant={intent === 'disable' ? 'danger' : 'primary'}
+                loading={busy}
+                onClick={submit}
+              >
+                {intent === 'disable' ? 'Disable 2FA' : 'Generate codes'}
+              </Button>
+            </>
+          )
+        }
+      >
+        {newCodes.length ? (
+          <div className="grid grid-cols-2 gap-2 rounded-[10px] border border-border bg-surface-2 p-4">
+            {newCodes.map((c) => (
+              <code key={c} className="font-mono text-[13px] tracking-wide text-ink">
+                {c}
+              </code>
+            ))}
+          </div>
+        ) : (
+          <Input
+            label="Password"
+            type="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            leftIcon={<KeyRound className="h-4 w-4" />}
+            value={password}
+            error={error || undefined}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setError('');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit();
+            }}
+          />
+        )}
+      </Modal>
+    </>
+  );
+}
+
+function SessionsCard({
+  sessions,
+  loading,
+  error,
+  onReload,
+}: {
+  sessions: ActiveSession[];
+  loading: boolean;
+  error: string;
+  onReload: () => void;
+}) {
+  const { toast } = useToast();
+  // Tracks the row being revoked so only that button shows a spinner.
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokingAll, setRevokingAll] = useState(false);
+
+  const others = sessions.filter((s) => !s.current);
+
+  const revoke = async (id: string) => {
+    setRevoking(id);
+    try {
+      await securityApi.revokeSession(id);
+      toast({ tone: 'success', title: 'Device signed out' });
+      onReload();
+    } catch (err) {
+      toast({ tone: 'error', title: parseApiError(err).message });
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  const revokeAll = async () => {
+    setRevokingAll(true);
+    try {
+      const res = await securityApi.revokeOtherSessions();
+      toast({
+        tone: 'success',
+        title: `Signed out ${res.revoked} other device${res.revoked === 1 ? '' : 's'}`,
+      });
+      onReload();
+    } catch (err) {
+      toast({ tone: 'error', title: parseApiError(err).message });
+    } finally {
+      setRevokingAll(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Active Sessions"
+        subtitle="Devices currently signed in"
+        action={
+          others.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={revokingAll}
+              leftIcon={<LogOut className="h-4 w-4" />}
+              onClick={revokeAll}
+            >
+              Sign out others
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <div className="mt-4 space-y-1">
+        {loading && (
+          <>
+            <Skeleton className="h-[54px] w-full rounded-[10px]" />
+            <Skeleton className="h-[54px] w-full rounded-[10px]" />
+          </>
+        )}
+
+        {!loading && error && (
+          <div className="flex flex-col items-start gap-3 py-2">
+            <p className="text-[13px] text-ink-secondary">{error}</p>
+            <Button variant="outline" size="sm" onClick={onReload}>
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {!loading && !error && sessions.length === 0 && (
+          <p className="py-2 text-[13px] text-ink-secondary">
+            No other devices are signed in.
+          </p>
+        )}
+
+        {!loading &&
+          !error &&
+          sessions.map((s) => (
+            <SessionRow
+              key={s.id}
+              session={s}
+              revoking={revoking === s.id}
+              onRevoke={() => revoke(s.id)}
+            />
+          ))}
+      </div>
+    </Card>
+  );
+}
+
+function SessionRow({
+  session,
+  revoking,
+  onRevoke,
+}: {
+  session: ActiveSession;
+  revoking: boolean;
+  onRevoke: () => void;
+}) {
+  // Phones and tablets get a different glyph so a list of similar-looking rows
+  // is scannable at a glance.
+  const handheld = /iOS|Android/i.test(session.os);
+  const Icon = handheld ? Smartphone : Monitor;
+
+  const detail = session.current
+    ? 'This device'
+    : [session.ip, relativeTime(session.lastSeenAt)].filter(Boolean).join(' · ');
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-[10px] px-2.5 py-2.5 transition-colors hover:bg-surface-2">
       <div className="flex items-center gap-3">
         <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-surface-3 text-ink-secondary">
-          <Monitor className="h-4 w-4" />
+          <Icon className="h-4 w-4" />
         </span>
-        <div>
-          <p className="text-[13px] font-semibold text-ink">{device}</p>
-          <p className="text-xs text-ink-tertiary">{location}</p>
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-ink">
+            {session.browser} · {session.os}
+          </p>
+          <p className="truncate text-xs text-ink-tertiary">{detail}</p>
         </div>
       </div>
-      {current ? (
+      {session.current ? (
         <Badge tone="success" dot>
           Active now
         </Badge>
       ) : (
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" loading={revoking} onClick={onRevoke}>
           Revoke
         </Button>
       )}

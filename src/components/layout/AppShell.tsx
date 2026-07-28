@@ -61,7 +61,19 @@ export default function AppShell({
     });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Drop the server-side session first, so this device stops appearing under
+    // Settings > Security > Active Sessions. Best-effort: if the call fails we
+    // still sign out locally rather than trapping the user in the app.
+    const refreshToken = apiClient.getRefreshToken();
+    if (refreshToken) {
+      try {
+        await apiClient.getClient().post('/auth/logout', { refreshToken });
+      } catch {
+        // Ignore — clearing the tokens below is what the user asked for.
+      }
+    }
+
     apiClient.clearTokens();
     router.push('/auth/login');
   };

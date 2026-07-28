@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ShieldCheck, ArrowLeft } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Input, Button } from '@/components/ui';
@@ -20,12 +20,27 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Set when the password was accepted but the account has a second factor.
+  // It stands in for the password from here on, so the password itself is never
+  // held in state across the two steps.
+  const [challengeToken, setChallengeToken] = useState('');
+  const [code, setCode] = useState('');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
       const res = await apiClient.getClient().post('/auth/login', { email, password });
+
+      if (res.data?.twoFactorRequired) {
+        setChallengeToken(res.data.challengeToken);
+        setPassword('');
+        setLoading(false);
+        return;
+      }
+
       apiClient.setTokens(res.data);
       router.push('/dashboard');
     } catch (err: any) {
@@ -33,6 +48,105 @@ function LoginForm() {
       setLoading(false);
     }
   };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiClient.getClient().post('/auth/login/2fa', {
+        challengeToken,
+        code: code.trim(),
+        isRecoveryCode: useRecoveryCode,
+      });
+      apiClient.setTokens(res.data);
+      router.push('/dashboard');
+    } catch (err: any) {
+      const message = err.response?.data?.message;
+      setError(
+        (Array.isArray(message) ? message[0] : message) || 'That code was not accepted'
+      );
+      setLoading(false);
+    }
+  };
+
+  const restart = () => {
+    setChallengeToken('');
+    setCode('');
+    setUseRecoveryCode(false);
+    setError('');
+  };
+
+  if (challengeToken) {
+    return (
+      <AuthLayout>
+        <div className="mb-8">
+          <h1 className="text-[26px] font-semibold tracking-tight text-ink">
+            Two-factor authentication
+          </h1>
+          <p className="mt-1.5 text-[14px] text-ink-secondary">
+            {useRecoveryCode
+              ? 'Enter one of the recovery codes you saved when you enabled 2FA.'
+              : 'Enter the 6-digit code from your authenticator app.'}
+          </p>
+        </div>
+
+        <form onSubmit={handleVerifyCode} className="space-y-4">
+          {error && (
+            <div className="rounded-[10px] border border-danger/30 bg-danger-soft px-3.5 py-2.5 text-[13px] font-medium text-danger">
+              {error}
+            </div>
+          )}
+
+          <Input
+            label={useRecoveryCode ? 'Recovery code' : 'Authentication code'}
+            required
+            autoFocus
+            // A 6-digit app code should raise a numeric keypad; a recovery code
+            // is alphanumeric, so leave the keyboard alone in that mode.
+            inputMode={useRecoveryCode ? 'text' : 'numeric'}
+            autoComplete="one-time-code"
+            placeholder={useRecoveryCode ? 'XXXX-XXXX' : '000000'}
+            leftIcon={<ShieldCheck className="h-4 w-4" />}
+            value={code}
+            onChange={(e) =>
+              setCode(
+                useRecoveryCode
+                  ? e.target.value.toUpperCase()
+                  : e.target.value.replace(/[^\d]/g, '').slice(0, 6)
+              )
+            }
+          />
+
+          <Button type="submit" loading={loading} size="lg" className="w-full">
+            Verify and sign in
+          </Button>
+
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={restart}
+              className="flex items-center gap-1.5 text-[13px] font-medium text-ink-secondary transition-colors hover:text-ink"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseRecoveryCode((v) => !v);
+                setCode('');
+                setError('');
+              }}
+              className="text-[13px] font-medium text-brand hover:text-brand-hover"
+            >
+              {useRecoveryCode ? 'Use authenticator app' : 'Use a recovery code'}
+            </button>
+          </div>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout>
