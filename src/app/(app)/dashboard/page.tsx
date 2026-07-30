@@ -146,10 +146,10 @@ export default function DashboardPage() {
         </div>
 
         {/* ---- Market overview / Client day change ---- */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader title="Market Overview" subtitle="Indices and commodities, daily and year-to-date" />
-            <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div className="mt-5 space-y-6">
               <div>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Indices</p>
                 <QuoteTable quotes={indices} loading={marketLoading} />
@@ -161,7 +161,7 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card>
+          <Card className="flex flex-col">
             <CardHeader title="Client Day Change" subtitle="Each client's portfolio, today vs. prior close" />
             <div className="mt-4">
               <ClientMoversTable rows={overview?.clientMovers} loading={overviewLoading} />
@@ -290,26 +290,24 @@ function ClientMoversTable({ rows, loading }: { rows?: ClientMover[]; loading: b
     return <p className="py-4 text-sm text-ink-tertiary">No data available</p>;
   }
   return (
-    <div className="max-h-[280px] overflow-y-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs font-medium text-ink-secondary">
-            <th className="pb-2">Client</th>
-            <th className="pb-2 text-right">Value</th>
-            <th className="pb-2 text-right">Day</th>
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs font-medium text-ink-secondary">
+          <th className="pb-2">Client</th>
+          <th className="pb-2 text-right">Value</th>
+          <th className="pb-2 text-right">Day</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.clientId} className="border-t border-border">
+            <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
+            <td className="py-2.5 text-right tabular-nums text-ink">{formatCurrency(r.marketValue)}</td>
+            <ChangeCell value={r.changePercent} />
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.clientId} className="border-t border-border">
-              <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
-              <td className="py-2.5 text-right tabular-nums text-ink">{formatCurrency(r.marketValue)}</td>
-              <ChangeCell value={r.changePercent} />
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
