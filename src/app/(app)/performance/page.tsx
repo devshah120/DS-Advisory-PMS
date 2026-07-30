@@ -95,51 +95,65 @@ export default function PerformancePage() {
     [clients, clientId],
   );
 
+  const handleClientChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setClientId(e.target.value);
+    },
+    []
+  );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    load(clientId);
+  }, [clientId, load]);
+
+  const actions = useMemo(
+    () => (
+      <>
+        {clients && clients.length > 0 && (
+          <Select
+            value={clientId}
+            onChange={handleClientChange}
+            aria-label="Client"
+          >
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        )}
+        <Button
+          variant="outline"
+          size="md"
+          leftIcon={<Download className="h-4 w-4" />}
+          disabled={!result || result.data.status !== 'ok'}
+          onClick={() => result && exportSheet(result)}
+        >
+          Export
+        </Button>
+        <Button
+          size="md"
+          leftIcon={
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+          }
+          disabled={!clientId || refreshing}
+          onClick={handleRefresh}
+        >
+          Refresh
+        </Button>
+      </>
+    ),
+    [clients, clientId, handleClientChange, result, refreshing, handleRefresh]
+  );
+
   usePageHeading(
     {
       title: "Performance",
       subtitle: result
                 ? result.meta.method
                 : 'Money-weighted returns, benchmark comparison and attribution',
-      actions: (
-        <>
-                  {clients && clients.length > 0 && (
-                    <Select
-                      value={clientId}
-                      onChange={(e) => setClientId(e.target.value)}
-                      aria-label="Client"
-                    >
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="md"
-                    leftIcon={<Download className="h-4 w-4" />}
-                    disabled={!result || result.data.status !== 'ok'}
-                    onClick={() => result && exportSheet(result)}
-                  >
-                    Export
-                  </Button>
-                  <Button
-                    size="md"
-                    leftIcon={
-                      <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-                    }
-                    disabled={!clientId || refreshing}
-                    onClick={() => {
-                      setRefreshing(true);
-                      load(clientId);
-                    }}
-                  >
-                    Refresh
-                  </Button>
-                </>
-      ),
+      actions,
     }
   );
 
