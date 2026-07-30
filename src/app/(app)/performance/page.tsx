@@ -46,7 +46,7 @@ export default function PerformancePage() {
   const { toast } = useToast();
 
   const [clients, setClients] = useState<Client[] | null>(null);
-  const [clientId, setClientId] = useState<string>('');
+  const [clientId, setClientId] = useState<string | null>(null);
   const [result, setResult] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -87,7 +87,7 @@ export default function PerformancePage() {
   useEffect(() => {
     if (!clientId) return;
     setLoading(true);
-    load(clientId);
+    load(clientId as string);
   }, [clientId, load]);
 
   const client = useMemo(
@@ -95,25 +95,17 @@ export default function PerformancePage() {
     [clients, clientId],
   );
 
-  const handleClientChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setClientId(e.target.value);
-    },
-    []
-  );
-
-  const handleRefresh = useCallback(() => {
-    setRefreshing(true);
-    load(clientId);
-  }, [clientId, load]);
-
-  const actions = useMemo(
-    () => (
+  usePageHeading({
+    title: "Performance",
+    subtitle: result
+      ? result.meta.method
+      : 'Money-weighted returns, benchmark comparison and attribution',
+    actions: (
       <>
         {clients && clients.length > 0 && (
           <Select
-            value={clientId}
-            onChange={handleClientChange}
+            value={clientId || ''}
+            onChange={(e) => setClientId(e.target.value)}
             aria-label="Client"
           >
             {clients.map((c) => (
@@ -138,24 +130,16 @@ export default function PerformancePage() {
             <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
           }
           disabled={!clientId || refreshing}
-          onClick={handleRefresh}
+          onClick={() => {
+            setRefreshing(true);
+            if (clientId) load(clientId);
+          }}
         >
           Refresh
         </Button>
       </>
     ),
-    [clients, clientId, handleClientChange, result, refreshing, handleRefresh]
-  );
-
-  usePageHeading(
-    {
-      title: "Performance",
-      subtitle: result
-                ? result.meta.method
-                : 'Money-weighted returns, benchmark comparison and attribution',
-      actions,
-    }
-  );
+  });
 
   return (
     <>
