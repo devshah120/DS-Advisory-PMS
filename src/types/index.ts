@@ -318,6 +318,15 @@ export interface DashboardOverview {
   sectorAllocation: AllocationSlice[];
   /** House-wide holdings grouped by ticker across every client, ranked by combined market value. */
   topHoldings: TopHolding[];
+  /** Each client's day change, weighted by their own holdings' market value. */
+  clientMovers: ClientMover[];
+}
+
+export interface ClientMover {
+  clientId: string;
+  clientName: string;
+  marketValue: number;
+  changePercent: number;
 }
 
 export interface TopHolding {

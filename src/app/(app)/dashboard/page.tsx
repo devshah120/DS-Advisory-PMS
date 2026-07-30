@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Landmark, Users, TrendingUp, TrendingDown, Briefcase, PiggyBank } from 'lucide-react';
 import { dashboardApi } from '@/lib/dashboard.api';
 import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/lib/utils';
-import { DashboardOverview, MarketQuote, HoldingMover } from '@/types';
+import { DashboardOverview, MarketQuote, HoldingMover, ClientMover } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
 import { SectorPieChart, TopHoldingsList } from '@/components/charts';
@@ -145,20 +145,29 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* ---- Market overview ---- */}
-        <Card>
-          <CardHeader title="Market Overview" subtitle="Indices and commodities, daily and year-to-date" />
-          <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
-            <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Indices</p>
-              <QuoteTable quotes={indices} loading={marketLoading} />
+        {/* ---- Market overview / Client day change ---- */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader title="Market Overview" subtitle="Indices and commodities, daily and year-to-date" />
+            <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Indices</p>
+                <QuoteTable quotes={indices} loading={marketLoading} />
+              </div>
+              <div>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Commodities</p>
+                <QuoteTable quotes={commodities} loading={marketLoading} />
+              </div>
             </div>
-            <div>
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Commodities</p>
-              <QuoteTable quotes={commodities} loading={marketLoading} />
+          </Card>
+
+          <Card>
+            <CardHeader title="Client Day Change" subtitle="Each client's portfolio, today vs. prior close" />
+            <div className="mt-4">
+              <ClientMoversTable rows={overview?.clientMovers} loading={overviewLoading} />
             </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
       </div>
     </>
   );
@@ -264,6 +273,43 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ClientMoversTable({ rows, loading }: { rows?: ClientMover[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (!rows || rows.length === 0) {
+    return <p className="py-4 text-sm text-ink-tertiary">No data available</p>;
+  }
+  return (
+    <div className="max-h-[280px] overflow-y-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs font-medium text-ink-secondary">
+            <th className="pb-2">Client</th>
+            <th className="pb-2 text-right">Value</th>
+            <th className="pb-2 text-right">Day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.clientId} className="border-t border-border">
+              <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
+              <td className="py-2.5 text-right tabular-nums text-ink">{formatCurrency(r.marketValue)}</td>
+              <ChangeCell value={r.changePercent} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
