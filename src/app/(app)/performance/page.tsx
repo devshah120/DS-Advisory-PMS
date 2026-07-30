@@ -34,8 +34,10 @@ import {
   EmptyState,
   Select,
   Skeleton,
+  Tabs,
   useToast,
 } from '@/components/ui';
+import { HistoricalPanel } from '@/components/performance/HistoricalPanel';
 
 /** Rate formatting. The engine speaks in fractions (0.12); people read percent. */
 const pct = (v: number, dp = 2) => `${(v * 100).toFixed(dp)}%`;
@@ -50,6 +52,7 @@ export default function PerformancePage() {
   const [result, setResult] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [view, setView] = useState<'current' | 'historical'>('current');
 
   useEffect(() => {
     (async () => {
@@ -143,6 +146,19 @@ export default function PerformancePage() {
 
   return (
     <>
+      {clients && clients.length > 0 && (
+        <div className="mb-6">
+          <Tabs
+            value={view}
+            onChange={(v) => setView(v as 'current' | 'historical')}
+            tabs={[
+              { value: 'current', label: 'Current (since inception)' },
+              { value: 'historical', label: 'Historical (as of a date)' },
+            ]}
+          />
+        </div>
+      )}
+
       {loading ? (
         <SheetSkeleton />
       ) : !clients?.length ? (
@@ -150,6 +166,8 @@ export default function PerformancePage() {
           title="No clients yet"
           description="Add a client, choose their accounting method, and their performance sheet appears here."
         />
+      ) : view === 'historical' ? (
+        clientId && <HistoricalPanel clientId={clientId} />
       ) : !result ? (
         <EmptyState
           title="Nothing to show"
