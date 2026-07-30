@@ -59,6 +59,22 @@ export interface PortfolioAsOf {
 
 export type PerformancePeriod = 'MTD' | 'QTD' | 'YTD' | 'CUSTOM';
 
+/**
+ * The index over the SAME window, same unit-purchase construction as the
+ * Current tab's Alpha card (PerformanceService.benchmark() /
+ * benchmarkXirr()) — not a plain point-to-point index return. `interim` is
+ * the figure comparable to the client's own return for the window; `xirr`
+ * is its annualized form, kept for reference the same way the Current tab
+ * keeps both.
+ */
+export interface BenchmarkWindowResult {
+  code: string;
+  name: string;
+  xirr: number | null;
+  interim: number | null;
+  reason?: string;
+}
+
 export interface PeriodReturn {
   period: PerformancePeriod;
   from: string;
@@ -67,6 +83,14 @@ export interface PeriodReturn {
   closingValue: number;
   /** Null when the opening value is zero — nothing to divide by. */
   returnPct: number | null;
+  /** Null when the client has no benchmark configured. */
+  benchmark: BenchmarkWindowResult | null;
+}
+
+export interface AutoSeedSummary {
+  created: string[];
+  skipped: string[];
+  failed: Array<{ clientId: string; reason: string }>;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -98,6 +122,17 @@ export const portfolioHistoryApi = {
       .get<PeriodReturn>(`/clients/${clientId}/portfolio-history/return`, {
         params: { from: iso(from), to: iso(to) },
       });
+    return res.data;
+  },
+
+  /**
+   * Seeds a Legacy Portfolio Baseline for every client that doesn't have one
+   * yet, from their current Holdings + the 30-June-2026 price close — no
+   * hand-typed holdings required. Safe to call repeatedly: already-seeded
+   * clients come back in `skipped`, never re-created.
+   */
+  async autoSeedBaselines(): Promise<AutoSeedSummary> {
+    const res = await apiClient.getClient().post<AutoSeedSummary>('/clients/baselines/auto-seed');
     return res.data;
   },
 };

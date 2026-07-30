@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CalendarClock, TrendingUp } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Scale, Sprout, TrendingUp } from 'lucide-react';
 import {
   portfolioHistoryApi,
   PortfolioAsOf,
   PeriodReturn,
 } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
-import { Badge, Card, CardHeader, Input, Select, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 
 const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
@@ -27,6 +27,7 @@ type Window = 'MTD' | 'QTD' | 'YTD' | 'CUSTOM';
  * any client that hasn't been onboarded onto this engine.
  */
 export function HistoricalPanel({ clientId }: { clientId: string }) {
+  const { toast } = useToast();
   const [windowSel, setWindowSel] = useState<Window>('QTD');
   const [asOfDate, setAsOfDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [customFrom, setCustomFrom] = useState<string>('');
@@ -36,6 +37,8 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(true);
   const [noBaseline, setNoBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +83,25 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [clientId, windowSel, asOfDate, customFrom]);
+  }, [clientId, windowSel, asOfDate, customFrom, reloadTick]);
+
+  async function seedBaselines() {
+    setSeeding(true);
+    try {
+      const summary = await portfolioHistoryApi.autoSeedBaselines();
+      toast({
+        tone: summary.failed.length ? 'error' : 'success',
+        title: `Baselines: ${summary.created.length} created, ${summary.skipped.length} already existed${
+          summary.failed.length ? `, ${summary.failed.length} failed` : ''
+        }`,
+      });
+      setReloadTick((t) => t + 1);
+    } catch {
+      toast({ tone: 'error', title: 'Could not seed baselines' });
+    } finally {
+      setSeeding(false);
+    }
+  }
 
   if (loading) return <HistoricalSkeleton />;
 
@@ -89,19 +110,26 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
       <Card>
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-[15px] font-semibold text-ink">
               No Legacy Portfolio Baseline set for this client
             </p>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
               Historical returns and as-of-date reports need an opening baseline
-              (holdings + cash as of the date Atlas started tracking this client)
-              before anything can be reconstructed. Create one via
-              <code className="mx-1 rounded bg-surface-2 px-1.5 py-0.5 text-[12px]">
-                POST /clients/{clientId}/baseline
-              </code>
-              .
+              (holdings + cash as of 30-June-2026, when Atlas started tracking
+              transactions) before anything can be reconstructed. This client&apos;s
+              current holdings can be used to build one automatically.
             </p>
+            <Button
+              className="mt-3"
+              variant="outline"
+              size="sm"
+              leftIcon={<Sprout className="h-4 w-4" />}
+              disabled={seeding}
+              onClick={seedBaselines}
+            >
+              {seeding ? 'Seeding…' : 'Seed baselines from Holdings'}
+            </Button>
           </div>
         </div>
       </Card>
@@ -158,22 +186,64 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
         </div>
 
         {periodReturn ? (
-          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatTile label="Opening value" value={formatCurrency(periodReturn.openingValue)} />
-            <StatTile label="Closing value" value={formatCurrency(periodReturn.closingValue)} />
-            <StatTile
-              label={`${windowSel} return`}
-              value={periodReturn.returnPct !== null ? signedPct(periodReturn.returnPct) : 'Not available'}
-              tone={
-                periodReturn.returnPct === null
-                  ? 'neutral'
-                  : periodReturn.returnPct >= 0
-                    ? 'pos'
-                    : 'neg'
-              }
-              icon={<TrendingUp className="h-4 w-4" />}
-            />
-          </div>
+          <>
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatTile label="Opening value" value={formatCurrency(periodReturn.openingValue)} />
+              <StatTile label="Closing value" value={formatCurrency(periodReturn.closingValue)} />
+              <StatTile
+                label={`${windowSel} return`}
+                value={periodReturn.returnPct !== null ? signedPct(periodReturn.returnPct) : 'Not available'}
+                tone={
+                  periodReturn.returnPct === null
+                    ? 'neutral'
+                    : periodReturn.returnPct >= 0
+                      ? 'pos'
+                      : 'neg'
+                }
+                icon={<TrendingUp className="h-4 w-4" />}
+              />
+              <StatTile
+                label={periodReturn.benchmark ? `vs ${periodReturn.benchmark.code}` : 'Benchmark'}
+                value={
+                  periodReturn.benchmark?.interim != null
+                    ? signedPct(periodReturn.benchmark.interim)
+                    : periodReturn.benchmark
+                      ? 'Not available'
+                      : 'No benchmark set'
+                }
+                tone={
+                  periodReturn.benchmark?.interim == null
+                    ? 'neutral'
+                    : periodReturn.benchmark.interim >= 0
+                      ? 'pos'
+                      : 'neg'
+                }
+                icon={<Scale className="h-4 w-4" />}
+              />
+            </div>
+            {periodReturn.benchmark?.interim != null && periodReturn.returnPct !== null && (
+              <p className="mt-3 text-[12px] leading-relaxed text-ink-tertiary">
+                Alpha ({windowSel}):{' '}
+                <span
+                  className={cn(
+                    'font-semibold',
+                    periodReturn.returnPct - periodReturn.benchmark.interim >= 0
+                      ? 'text-emerald-600'
+                      : 'text-rose-600',
+                  )}
+                >
+                  {signedPct(periodReturn.returnPct - periodReturn.benchmark.interim)}
+                </span>{' '}
+                vs {periodReturn.benchmark.name}, same window, unit-purchase method (same
+                construction as the Current tab&apos;s Alpha card).
+              </p>
+            )}
+            {periodReturn.benchmark?.reason && (
+              <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
+                {periodReturn.benchmark.reason}
+              </p>
+            )}
+          </>
         ) : windowSel === 'CUSTOM' && !customFrom ? (
           <p className="mt-4 text-[13px] text-ink-tertiary">
             Choose a &quot;From&quot; date to compute a custom-range return.
