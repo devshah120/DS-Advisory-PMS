@@ -14,7 +14,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-app">
       {/* Video panel — edge to edge, no padding */}
-      <div className="relative hidden w-1/2 overflow-hidden bg-[#fbfbfa] lg:flex lg:items-center lg:justify-center">
+      <div className="relative hidden w-1/2 overflow-hidden bg-white lg:flex lg:items-center lg:justify-center">
         <video
           autoPlay
           muted
@@ -22,7 +22,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           playsInline
           preload="auto"
           className="h-[78%] w-full object-contain"
-          style={{ transform: 'translateZ(0) translateY(-6%)' }}
+          style={{ transform: 'translateZ(0) translateY(-6%)', filter: 'brightness(1.06) contrast(1.03)' }}
         >
           <source src="/media/ggc-logo.mp4" type="video/mp4" />
         </video>
