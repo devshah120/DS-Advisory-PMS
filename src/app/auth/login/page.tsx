@@ -152,7 +152,7 @@ function LoginForm() {
     <AuthLayout>
       <div className="mb-8">
         <h1 className="text-[26px] font-semibold tracking-tight text-ink">Welcome back</h1>
-        <p className="mt-1.5 text-[14px] text-ink-secondary">Sign in to your DS Advisory workspace.</p>
+        <p className="mt-1.5 text-[14px] text-ink-secondary">Sign in to your Giriraj Global Capital workspace.</p>
       </div>
 
       <form onSubmit={handleLogin} className="space-y-4">

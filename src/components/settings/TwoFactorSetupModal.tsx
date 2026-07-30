@@ -92,7 +92,7 @@ export function TwoFactorSetupModal({
 
   const downloadCodes = () => {
     const body = [
-      'DS Advisory — two-factor recovery codes',
+      'Giriraj Global Capital — two-factor recovery codes',
       'Each code can be used once if you lose access to your authenticator app.',
       '',
       ...recoveryCodes,

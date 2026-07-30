@@ -19,7 +19,7 @@ export default function Home() {
     <div className="flex min-h-screen items-center justify-center bg-app">
       <div className="flex flex-col items-center gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-brand" />
-        <p className="text-[13px] text-ink-tertiary">Loading DS Advisory…</p>
+        <p className="text-[13px] text-ink-tertiary">Loading Giriraj Global Capital…</p>
       </div>
     </div>
   );

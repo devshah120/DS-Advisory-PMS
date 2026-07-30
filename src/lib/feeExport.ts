@@ -17,7 +17,7 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
  */
 export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'DS Advisory';
+  wb.creator = 'Giriraj Global Capital';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Fee Schedule', {

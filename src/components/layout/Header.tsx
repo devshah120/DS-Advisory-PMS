@@ -110,7 +110,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
       {/* Breadcrumbs */}
       <nav className="flex min-w-0 items-center gap-1.5 text-[13px]">
         <Link href="/dashboard" className="font-medium text-ink-tertiary hover:text-ink">
-          DS Advisory
+          Giriraj Global Capital
         </Link>
         {segments.map((seg, i) => {
           const last = i === segments.length - 1;

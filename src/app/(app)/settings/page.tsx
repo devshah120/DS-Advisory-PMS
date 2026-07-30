@@ -445,7 +445,7 @@ export default function SettingsPage() {
                     />
                     <ToggleRow
                       label="Product updates"
-                      description="Occasional news about new DS Advisory features."
+                      description="Occasional news about new Giriraj Global Capital features."
                       checked={notifications.productUpdates}
                       onChange={() => toggleNotif('productUpdates')}
                     />

@@ -10,9 +10,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'DS Advisory — Institutional Portfolio Management',
+  title: 'Giriraj Global Capital — Equity & ETF Advisory',
   description:
-    'DS Advisory Portfolio Management System. Institutional-grade analytics, holdings, and reporting for asset managers, family offices and private banks.',
+    'Giriraj Global Capital Portfolio Management System. Equity and ETF analytics, holdings, and reporting across country, commodity, and sectoral opportunities.',
 };
 
 export default function RootLayout({

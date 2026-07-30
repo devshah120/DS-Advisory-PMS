@@ -188,7 +188,7 @@ export function buildClientHoldingsWorkbook(
   cashBalance = 0
 ): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'DS Advisory';
+  wb.creator = 'Giriraj Global Capital';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Holdings', { views: [{ showGridLines: false }] });
