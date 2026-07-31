@@ -36,9 +36,9 @@ const PageHeaderContext = createContext<PageHeaderStore | null>(null);
  *
  * Deliberately excludes `actions`: it is a fresh React element on every render
  * of the owning page, so it can never be compared by reference, and comparing
- * by content isn't practical either. `set` (below) treats any heading that
- * carries actions as always-changed, so this key only needs to catch the
- * common case of a page re-publishing the exact same title/subtitle.
+ * by content isn't practical either. That is why the layout reads `actions`
+ * live through the ref instead -- it never needs to be diffed, only its
+ * presence does (see `set` below).
  */
 const headingTextKey = (h: PageHeading) => `${h.title ?? ''} ${h.subtitle ?? ''}`;
 
@@ -52,12 +52,18 @@ export function PageHeaderProvider({ children }: { children: ReactNode }) {
 
   const set = useCallback((next: PageHeading) => {
     const prev = current.current;
-    // Any heading carrying actions is treated as always-changed: actions JSX
-    // can close over page state (e.g. a selected client id) that changes
-    // without title/subtitle changing, and that update still has to reach
-    // the shell or the rendered controls go stale.
+    // The ref always holds the latest heading, so the layout reading through
+    // `ref.current` at render time picks up fresh action closures for free.
+    // Only the *rendered form* changing needs to force a re-render, and that is
+    // exactly the text plus whether actions appeared or disappeared.
+    //
+    // Treating "has actions" as always-changed (the previous rule) never
+    // converges: the effect that calls this runs after every render, so
+    // bumping the version on every call re-renders the page, which calls this
+    // again -- an infinite loop that hangs the tab on any page heavy enough
+    // that one render costs real time.
     const changed =
-      headingTextKey(prev) !== headingTextKey(next) || !!next.actions || !!prev.actions;
+      headingTextKey(prev) !== headingTextKey(next) || !!prev.actions !== !!next.actions;
     current.current = next;
     if (changed) setVersion((v) => v + 1);
   }, []);
