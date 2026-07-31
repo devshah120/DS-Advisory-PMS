@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, AlertTriangle, Info, XCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -20,11 +20,18 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+/**
+ * Shared no-op fallback. A module-level constant rather than a fresh object per
+ * call so that `toast` keeps a stable identity outside a provider too --
+ * consumers put it in dependency arrays.
+ */
+const NOOP_TOAST: ToastContextValue = { toast: () => {} };
+
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) {
     // No-op fallback so components don't crash outside provider
-    return { toast: () => {} };
+    return NOOP_TOAST;
   }
   return ctx;
 }
@@ -52,8 +59,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [remove]
   );
 
+  // Memoised because consumers list `toast` in hook dependency arrays. A fresh
+  // object here would hand every consumer a new `toast` identity each time a
+  // toast is added or removed -- re-running their effects, which for a page
+  // that fetches on mount means an endless fetch/render loop.
+  const value = useMemo(() => ({ toast }), [toast]);
+
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <div className="pointer-events-none fixed bottom-6 right-6 z-[100] flex w-full max-w-sm flex-col gap-3">
         <AnimatePresence initial={false}>
