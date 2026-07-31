@@ -23,9 +23,17 @@ import {
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Card, CardHeader, Input, Select, Button, useToast } from '@/components/ui';
 
+/** Today in the yyyy-mm-dd shape a date input expects, in local time. */
+const today = () => {
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  return new Date(d.getTime() - offset * 60_000).toISOString().slice(0, 10);
+};
+
 const initial = {
   side: 'buy' as 'buy' | 'sell',
   clientId: '',
+  tradeDate: today(),
   ticker: '',
   company: '',
   quantity: '',
@@ -165,6 +173,10 @@ export default function AddSymbolPage() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.clientId) e.clientId = 'Select a client';
+    if (!form.tradeDate) e.tradeDate = 'Enter the trade date';
+    else if (new Date(`${form.tradeDate}T00:00:00`) > new Date()) {
+      e.tradeDate = 'Trade date cannot be in the future';
+    }
     if (!form.ticker.trim()) e.ticker = 'Ticker is required';
     else if (status === 'notfound') e.ticker = 'Unknown ticker';
     if (!form.company.trim()) e.company = 'Company name is required';
@@ -195,6 +207,10 @@ export default function AddSymbolPage() {
         quantity: isSell ? -qty : qty,
         averageCost: avgCost,
         currentPrice: price,
+        // Dates the ledger row this creates. XIRR weights flows by date, so a
+        // back-dated trade has to carry its own date rather than land on today.
+        date: new Date(`${form.tradeDate}T00:00:00`).toISOString(),
+        amountInvested,
       });
       toast({
         tone: 'success',
@@ -257,20 +273,33 @@ export default function AddSymbolPage() {
                 </div>
               </div>
 
-              <Select
-                label="Client Account"
-                required
-                value={form.clientId}
-                onChange={(e) => set('clientId', e.target.value)}
-                error={errors.clientId}
-              >
-                <option value="">Select a client…</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <Select
+                  label="Client Account"
+                  required
+                  value={form.clientId}
+                  onChange={(e) => set('clientId', e.target.value)}
+                  error={errors.clientId}
+                >
+                  <option value="">Select a client…</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+
+                <Input
+                  label="Trade Date"
+                  required
+                  type="date"
+                  max={today()}
+                  value={form.tradeDate}
+                  onChange={(e) => set('tradeDate', e.target.value)}
+                  error={errors.tradeDate}
+                  helper="When the trade happened — drives XIRR"
+                />
+              </div>
 
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <Input
