@@ -103,6 +103,19 @@ export interface PerformanceOk extends CrossSectional {
 
   cashDrag: number | null;
 
+  /**
+   * The sheet's own arithmetic proof: total gain computed from the flow series
+   * against the same figure computed from the position-level gains. Anchored on
+   * the same 30-June basis they must be equal, so a non-zero `residual` means a
+   * calculation has drifted and the numbers on the page cannot all be right.
+   */
+  reconciliation: {
+    totalGainFromFlows: number;
+    totalGainFromPositions: number;
+    residual: number;
+    balanced: boolean;
+  };
+
   periodDays: number;
   inceptionDate: string;
   flows: Array<{ date: string; amount: number }>;

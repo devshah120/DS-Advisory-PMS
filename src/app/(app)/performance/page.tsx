@@ -502,7 +502,10 @@ function BookSection({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Capital & Gains" />
+          <CardHeader
+            title="Capital & Gains"
+            subtitle="Measured from the 30-June-2026 inception basis, the same basis as the XIRR"
+          />
           <div className="mt-4 divide-y divide-border">
             <Row label="Invested capital" value={ok ? formatCurrency(ok.investedCapital) : '—'} />
             <Row label="Realized proceeds" value={ok ? formatCurrency(ok.realizedProceeds) : '—'} />
@@ -555,6 +558,25 @@ function BookSection({
               />
             )}
           </div>
+          {/**
+           * The card checking itself. Total gain is computed two independent
+           * ways — from the flow series and from the position-level gains — and
+           * anchored on the same 30-June basis they must agree. This banner is
+           * the alarm for the exact failure that shipped before: two plausible
+           * figures on one card, computed from different cost bases, with
+           * nothing comparing them.
+           */}
+          {ok && !ok.reconciliation.balanced && (
+            <p className="mt-4 rounded-lg bg-amber-50 p-3 text-[12px] leading-relaxed text-amber-700">
+              <AlertTriangle className="mr-1.5 inline h-3.5 w-3.5" />
+              These figures do not balance: total gain is{' '}
+              {formatSignedCurrency(ok.reconciliation.totalGainFromFlows)} from the cash-flow
+              series but {formatSignedCurrency(ok.reconciliation.totalGainFromPositions)} from
+              the position-level gains, a residual of{' '}
+              {formatSignedCurrency(ok.reconciliation.residual)}. Treat every number on this
+              card as unreliable until it is resolved.
+            </p>
+          )}
         </Card>
 
         <div className="space-y-6">
