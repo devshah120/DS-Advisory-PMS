@@ -52,8 +52,8 @@ export default function EventCenterPage() {
     void load();
   }, [load]);
 
-  // Spends FMP request budget (3 calendar requests): re-fetches the FMP
-  // calendars into the DB snapshot, then reloads the page from that snapshot.
+  // One Yahoo request per held ticker, so this takes a few seconds: re-fetches
+  // the calendar into the DB snapshot, then reloads the page from that snapshot.
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -61,7 +61,7 @@ export default function EventCenterPage() {
       await load();
       toast({ tone: 'success', title: `Event calendar refreshed — ${refreshed} events` });
     } catch {
-      toast({ tone: 'error', title: 'Refresh failed — FMP may be rate-limited' });
+      toast({ tone: 'error', title: 'Refresh failed — Yahoo may be rate-limiting' });
     } finally {
       setRefreshing(false);
     }
@@ -88,7 +88,10 @@ export default function EventCenterPage() {
     {
       key: 'event',
       header: 'Event',
-      accessor: (e) => TYPE_META[e.type].label,
+      // The backend's label is more specific than the type (a DIVIDEND row is
+      // either an ex-date or a pay date), so prefer it and keep the type only
+      // as the icon/tone lookup and the fallback.
+      accessor: (e) => e.label || TYPE_META[e.type].label,
       render: (e) => {
         const meta = TYPE_META[e.type];
         const Icon = meta.icon;
@@ -104,7 +107,7 @@ export default function EventCenterPage() {
             >
               <Icon className="h-3.5 w-3.5" />
             </span>
-            <span className="text-[13px] font-medium text-ink">{meta.label}</span>
+            <span className="text-[13px] font-medium text-ink">{e.label || meta.label}</span>
           </span>
         );
       },
@@ -167,7 +170,7 @@ export default function EventCenterPage() {
             onClick={handleRefresh}
             leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh from FMP'}
+            {refreshing ? 'Refreshing…' : 'Refresh from Yahoo'}
           </Button>
         </div>
 
@@ -175,7 +178,7 @@ export default function EventCenterPage() {
           columns={columns}
           data={filtered}
           loading={loading}
-          rowKey={(e) => `${e.ticker}-${e.type}-${e.date}`}
+          rowKey={(e) => `${e.ticker}-${e.type}-${e.label}-${e.date}`}
           searchPlaceholder="Search by symbol or company…"
           searchKeys={(e) => `${e.ticker} ${e.company}`}
           pageSize={10}
@@ -185,7 +188,7 @@ export default function EventCenterPage() {
               [
                 { key: 'ticker', header: 'Symbol', accessor: (e: PortfolioEvent) => e.ticker },
                 { key: 'company', header: 'Company', accessor: (e: PortfolioEvent) => e.company },
-                { key: 'event', header: 'Event', accessor: (e: PortfolioEvent) => TYPE_META[e.type].label },
+                { key: 'event', header: 'Event', accessor: (e: PortfolioEvent) => e.label || TYPE_META[e.type].label },
                 { key: 'date', header: 'Date', accessor: (e: PortfolioEvent) => e.date },
                 { key: 'clientCount', header: 'Held By (clients)', accessor: (e: PortfolioEvent) => e.clientCount },
                 { key: 'status', header: 'Status', accessor: (e: PortfolioEvent) => e.status },
