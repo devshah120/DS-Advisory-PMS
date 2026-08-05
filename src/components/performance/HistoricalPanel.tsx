@@ -6,14 +6,13 @@ import {
   portfolioHistoryApi,
   PortfolioAsOf,
   PeriodReturn,
+  PeriodOption,
 } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 
 const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
-
-type Window = 'MTD' | 'QTD' | 'YTD' | 'CUSTOM';
 
 /**
  * The Legacy Baseline / Reconstruction engine's view: MTD/QTD/YTD/custom
@@ -28,9 +27,19 @@ type Window = 'MTD' | 'QTD' | 'YTD' | 'CUSTOM';
  */
 export function HistoricalPanel({ clientId }: { clientId: string }) {
   const { toast } = useToast();
-  const [windowSel, setWindowSel] = useState<Window>('QTD');
-  const [asOfDate, setAsOfDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
+  /**
+   * ONE control drives the whole tab. Selecting a period sets both the return
+   * window and the date the holdings/allocation are shown as of — the period's
+   * own end date, which the backend resolves (and clamps to today for a quarter
+   * that has not closed). Two independent date controls could otherwise show a
+   * Q2 return above a Q3 allocation table, which reads as a single coherent
+   * report and is not one.
+   */
+  const [period, setPeriod] = useState<string>('INCEPTION');
+  const [options, setOptions] = useState<PeriodOption[]>([]);
   const [customFrom, setCustomFrom] = useState<string>('');
+  const [customTo, setCustomTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
   const [periodReturn, setPeriodReturn] = useState<PeriodReturn | null>(null);
   const [asOf, setAsOf] = useState<PortfolioAsOf | null>(null);
@@ -42,25 +51,44 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    portfolioHistoryApi
+      .periods(clientId)
+      .then((p) => !cancelled && setOptions(p))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  useEffect(() => {
+    let cancelled = false;
 
     async function load() {
       setLoading(true);
       setError(null);
       setNoBaseline(false);
 
+      // A custom range needs its start before anything can be computed.
+      if (period === 'CUSTOM' && !customFrom) {
+        setPeriodReturn(null);
+        setAsOf(null);
+        setLoading(false);
+        return;
+      }
+
       try {
-        const [pr, ao] =
-          windowSel === 'CUSTOM'
-            ? await Promise.all([
-                customFrom
-                  ? portfolioHistoryApi.customReturn(clientId, new Date(customFrom), new Date(asOfDate))
-                  : null,
-                portfolioHistoryApi.asOf(clientId, new Date(asOfDate)),
-              ])
-            : await Promise.all([
-                portfolioHistoryApi.periodReturn(clientId, windowSel),
-                portfolioHistoryApi.asOf(clientId, new Date(asOfDate)),
-              ]);
+        const pr =
+          period === 'CUSTOM'
+            ? await portfolioHistoryApi.customReturn(
+                clientId,
+                new Date(customFrom),
+                new Date(customTo),
+              )
+            : await portfolioHistoryApi.periodReturn(clientId, period);
+
+        // The holdings view follows the window the backend actually resolved,
+        // so the allocation below is always as of the same date the return ends.
+        const ao = await portfolioHistoryApi.asOf(clientId, new Date(pr.to));
 
         if (cancelled) return;
         setPeriodReturn(pr);
@@ -83,7 +111,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [clientId, windowSel, asOfDate, customFrom, reloadTick]);
+  }, [clientId, period, customFrom, customTo, reloadTick]);
 
   async function seedBaselines() {
     setSeeding(true);
@@ -154,44 +182,59 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
           <div>
             <CardHeader
               title="Historical Return"
-              subtitle="Opening value from the daily snapshot, or reconstructed from the baseline"
+              subtitle="Every window is based on the 30-June-2026 portfolio value and never opens before it"
             />
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <Select
-              value={windowSel}
-              onChange={(e) => setWindowSel(e.target.value as Window)}
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
               aria-label="Period"
             >
-              <option value="MTD">Month to date</option>
-              <option value="QTD">Quarter to date</option>
-              <option value="YTD">Year to date</option>
-              <option value="CUSTOM">Custom range</option>
+              {options.length === 0 ? (
+                <option value="INCEPTION">Since inception (30 Jun 2026)</option>
+              ) : (
+                options.map((o) => (
+                  <option key={o.code} value={o.code}>
+                    {o.label}
+                  </option>
+                ))
+              )}
             </Select>
-            {windowSel === 'CUSTOM' && (
-              <Input
-                type="date"
-                label="From"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-              />
+            {period === 'CUSTOM' && (
+              <>
+                <Input
+                  type="date"
+                  label="From"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                />
+                <Input
+                  type="date"
+                  label="To"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                />
+              </>
             )}
-            <Input
-              type="date"
-              label={windowSel === 'CUSTOM' ? 'To' : 'As of'}
-              value={asOfDate}
-              onChange={(e) => setAsOfDate(e.target.value)}
-            />
           </div>
         </div>
 
         {periodReturn ? (
           <>
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Opening value" value={formatCurrency(periodReturn.openingValue)} />
+            <p className="mt-3 text-[12px] text-ink-tertiary">
+              {periodReturn.label} · {periodReturn.from.slice(0, 10)} → {periodReturn.to.slice(0, 10)}
+              {periodReturn.openPeriod && ' · period still open, measured to today'}
+              {periodReturn.clampedToInception && ' · start pulled forward to inception'}
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatTile
+                label={`Opening value (${periodReturn.from.slice(0, 10)})`}
+                value={formatCurrency(periodReturn.openingValue)}
+              />
               <StatTile label="Closing value" value={formatCurrency(periodReturn.closingValue)} />
               <StatTile
-                label={`${windowSel} return`}
+                label={`${periodReturn.label} return`}
                 value={periodReturn.returnPct !== null ? signedPct(periodReturn.returnPct) : 'Not available'}
                 tone={
                   periodReturn.returnPct === null
@@ -223,7 +266,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
             </div>
             {periodReturn.benchmark?.interim != null && periodReturn.returnPct !== null && (
               <p className="mt-3 text-[12px] leading-relaxed text-ink-tertiary">
-                Alpha ({windowSel}):{' '}
+                Alpha ({periodReturn.label}):{' '}
                 <span
                   className={cn(
                     'font-semibold',
@@ -244,7 +287,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
               </p>
             )}
           </>
-        ) : windowSel === 'CUSTOM' && !customFrom ? (
+        ) : period === 'CUSTOM' && !customFrom ? (
           <p className="mt-4 text-[13px] text-ink-tertiary">
             Choose a &quot;From&quot; date to compute a custom-range return.
           </p>
@@ -255,7 +298,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
         <>
           <Card>
             <CardHeader
-              title={`Portfolio as of ${asOfDate}`}
+              title={`Portfolio as of ${asOf.asOfDate.slice(0, 10)}`}
               subtitle={
                 <span className="inline-flex items-center gap-1.5">
                   <CalendarClock className="h-3.5 w-3.5" />
@@ -280,6 +323,14 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
                 tone={asOf.realizedGain >= 0 ? 'pos' : 'neg'}
               />
             </div>
+            {asOf.cashShortfall > 0 && (
+              <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
+                Cash is shown as zero: replaying the ledger to this date left it{' '}
+                {formatCurrency(asOf.cashShortfall)} below zero, which means some proceeds are
+                recorded without their matching purchase. Allocation weights are computed on the
+                floored balance, so they stay correct — but the ledger gap is worth closing.
+              </p>
+            )}
           </Card>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
