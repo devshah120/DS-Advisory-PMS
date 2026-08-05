@@ -58,4 +58,16 @@ export const holdingsApi = {
   async remove(id: string): Promise<void> {
     await apiClient.getClient().delete(`/holdings/${id}`);
   },
+
+  /**
+   * Fetches the portfolio as it existed on a specific date by replaying
+   * all buy/sell transactions up to that date.
+   */
+  async getPortfolioAsOfDate(clientId: string, asOfDate: Date) {
+    const dateStr = asOfDate.toISOString().split('T')[0];
+    const res = await apiClient
+      .getClient()
+      .get(`/holdings/client/${clientId}/as-of-date/${dateStr}`);
+    return res.data;
+  },
 };

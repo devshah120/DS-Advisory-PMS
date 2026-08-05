@@ -160,6 +160,10 @@ export default function HoldingsPage() {
   const [pendingDelete, setPendingDelete] = useState<ClientPositionRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // --- historical holdings ---
+  const [historicalDate, setHistoricalDate] = useState<string>('');
+  const [loadingHistorical, setLoadingHistorical] = useState(false);
+
   async function loadHoldings() {
     try {
       const res = await apiClient.getClient().get('/holdings');
@@ -273,6 +277,68 @@ export default function HoldingsPage() {
       toast({ tone: 'error', title: 'Could not delete position', description: String(message) });
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleExportHistoricalHoldings() {
+    if (!activeClient || !historicalDate) return;
+
+    setLoadingHistorical(true);
+    try {
+      const asOfDate = new Date(historicalDate);
+      const historicalHoldings = await holdingsApi.getPortfolioAsOfDate(activeClient.clientId, asOfDate);
+
+      const rows: ClientPositionRow[] = historicalHoldings
+        .sort((a: any, b: any) => b.marketValue - a.marketValue)
+        .map((h: any, i: number) => {
+          const costBasisTotal = h.averageCost * h.quantity;
+          const currentValue = h.quantity * h.currentPrice;
+          const pl = currentValue - costBasisTotal;
+          const total = clientTotals.currentValue + activeClient.cashBalance;
+
+          return {
+            id: h.id,
+            srNo: i + 1,
+            symbol: h.ticker,
+            name: h.company,
+            sector: h.sector || 'Uncategorized',
+            quantity: h.quantity,
+            averageCostBasis: h.averageCost,
+            costBasisTotal,
+            lastPrice: h.currentPrice,
+            currentValue,
+            pl,
+            plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
+            allocPercent: total ? (currentValue / total) * 100 : 0,
+          };
+        });
+
+      const formattedDate = historicalDate.replace(/-/g, '_');
+      const filename = `${activeClient.clientName.replace(/\s+/g, '_').toLowerCase()}-holdings-as-of-${formattedDate}`;
+
+      const totalHistorical = rows.reduce(
+        (acc, r) => ({
+          costBasisTotal: acc.costBasisTotal + r.costBasisTotal,
+          currentValue: acc.currentValue + r.currentValue,
+          pl: acc.pl + r.pl,
+        }),
+        { costBasisTotal: 0, currentValue: 0, pl: 0 }
+      );
+
+      await downloadClientHoldingsWorkbook(filename, rows, activeClient.cashBalance);
+      toast({
+        tone: 'success',
+        title: 'Historical holdings exported',
+        description: `Portfolio as of ${historicalDate} downloaded`,
+      });
+      setHistoricalDate('');
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message ??
+        (typeof err?.message === 'string' ? err.message : 'Export failed');
+      toast({ tone: 'error', title: 'Could not export historical holdings', description: String(message) });
+    } finally {
+      setLoadingHistorical(false);
     }
   }
 
@@ -1188,6 +1254,33 @@ export default function HoldingsPage() {
                 )}
                 tone={clientTotals.pl >= 0 ? 'success' : 'danger'}
               />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <label htmlFor="historical-date" className="block text-sm font-medium text-ink-secondary mb-2">
+                  Export holdings as of date
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="historical-date"
+                    type="date"
+                    value={historicalDate}
+                    onChange={(e) => setHistoricalDate(e.target.value)}
+                    max={new Date().toISOString().split('T')[0]}
+                    className="flex-1 px-3 py-2 rounded-[8px] border border-border bg-surface-2 text-sm text-ink placeholder-ink-tertiary focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  <Button
+                    variant="secondary"
+                    leftIcon={<Download className="h-4 w-4" />}
+                    onClick={handleExportHistoricalHoldings}
+                    disabled={!historicalDate || loadingHistorical}
+                    loading={loadingHistorical}
+                  >
+                    Export Historical
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <DataTable
