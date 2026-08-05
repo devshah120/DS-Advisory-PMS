@@ -3,6 +3,13 @@ import { ClientFeeRow } from '@/types/reports';
 import { formatDate } from './utils';
 
 const LABEL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+
+const VALUATION_SOURCE_LABEL: Record<string, string> = {
+  snapshot: 'Quarter-end snapshot (recorded on the day)',
+  reconstruction: 'Reconstructed from baseline + transactions',
+  live: 'Live holdings (quarter still open)',
+  unavailable: 'Unavailable — no baseline to value from',
+};
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
   bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
@@ -37,9 +44,16 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
 
   sheet.addRow([]);
 
+  // A closed quarter is billed on its locked quarter-end NAV; an open one can
+  // only show today's moving value. Labelling the row tells the reader which
+  // they are looking at, so an estimate is never mistaken for an invoice.
+  const valueLabel = fee.isEstimate
+    ? 'Portfolio value (live, quarter in progress)'
+    : 'Portfolio value (quarter-end)';
+
   const rows: Array<[string, string | number, string?]> = [
     ['Annual fee rate', fee.feeRatePercent / 100, '0.00%'],
-    ['Portfolio value', fee.portfolioValue, '"$"#,##0.00'],
+    [valueLabel, fee.portfolioValue, '"$"#,##0.00'],
     ['Days billed this quarter', `${fee.daysBilled} / ${fee.daysInQuarter}`],
     ['Quarterly rate (annual ÷ 4)', fee.feeRatePercent / 100 / 4, '0.0000%'],
     ['Proration (days billed ÷ days in quarter)', fee.daysBilled / fee.daysInQuarter, '0.00%'],
@@ -67,10 +81,17 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   sheet.addRow([]);
   const statusRow = sheet.addRow([
     'Status',
-    fee.isEstimate ? 'Estimate (quarter in progress)' : 'Final',
+    fee.isEstimate ? 'Estimate (quarter in progress)' : 'Final — billed',
   ]);
   statusRow.getCell(1).font = { size: 9, color: { argb: 'FF6B7280' } };
   statusRow.getCell(2).font = { size: 9, color: { argb: 'FF6B7280' } };
+
+  // Where the portfolio value came from. A reconstructed value is as correct
+  // as a stored one but was replayed rather than recorded on the day, and a
+  // reader auditing an old invoice needs to be able to tell the difference.
+  const sourceRow = sheet.addRow(['Valuation source', VALUATION_SOURCE_LABEL[fee.valuationSource] ?? fee.valuationSource]);
+  sourceRow.getCell(1).font = { size: 9, color: { argb: 'FF6B7280' } };
+  sourceRow.getCell(2).font = { size: 9, color: { argb: 'FF6B7280' } };
 
   const workingTitle = sheet.addRow(['Working']);
   workingTitle.font = { bold: true, size: 11 };

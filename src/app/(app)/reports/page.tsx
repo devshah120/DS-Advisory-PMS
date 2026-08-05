@@ -15,9 +15,9 @@ import {
 import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
 import { downloadClientFeeWorkbook } from '@/lib/feeExport';
-import { ClientFeeRow } from '@/types/reports';
+import { ClientFeeRow, FeeQuarterOption } from '@/types/reports';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
-import { Card, CardHeader, Badge, Button, useToast } from '@/components/ui';
+import { Card, CardHeader, Badge, Button, Select, useToast } from '@/components/ui';
 
 interface ReportTemplate {
   id: string;
@@ -100,6 +100,9 @@ const recentReports: GeneratedReport[] = [
   { id: 'r5', name: 'Transaction Ledger — May 2026', type: 'Transactions', period: 'May 2026', createdAt: daysAgo(11), format: 'CSV', status: 'ready' },
 ];
 
+/** Sentinel for `exportingId` — the bulk export isn't any one client's row. */
+const ALL_EXPORT_ID = '__all__';
+
 const formatTone: Record<GeneratedReport['format'], any> = {
   PDF: 'danger',
   XLSX: 'success',
@@ -114,18 +117,66 @@ export default function ReportsPage() {
   const [feesLoading, setFeesLoading] = useState(true);
   const [exportingId, setExportingId] = useState<string | null>(null);
 
+  const [quarters, setQuarters] = useState<FeeQuarterOption[]>([]);
+  // Empty string = the current quarter (what the backend serves with no
+  // ?quarter=), and also "All clients" for the client filter.
+  const [quarter, setQuarter] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+
   useEffect(() => {
     let mounted = true;
     reportsApi
-      .currentQuarterFees()
-      .then((rows) => mounted && setFees(rows))
-      .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load fee schedule' }))
-      .finally(() => mounted && setFeesLoading(false));
+      .feeQuarters()
+      .then((rows) => {
+        if (!mounted) return;
+        setQuarters(rows);
+        // Default to the newest quarter so the page opens on "now" as before.
+        if (rows.length > 0) setQuarter(rows[0].code);
+      })
+      .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load quarters' }));
     return () => {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refetches whenever the quarter changes. The client filter is applied
+  // client-side below — every client's row for a quarter arrives in one call,
+  // so filtering locally avoids a round trip per selection.
+  useEffect(() => {
+    let mounted = true;
+    setFeesLoading(true);
+    reportsApi
+      .fees(quarter || undefined)
+      .then((rows) => mounted && setFees(rows))
+      .catch(() => {
+        if (!mounted) return;
+        setFees([]);
+        toast({ tone: 'error', title: 'Failed to load fee schedule' });
+      })
+      .finally(() => mounted && setFeesLoading(false));
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quarter]);
+
+  // Clients present in this quarter — derived from the rows themselves rather
+  // than the full client list, so the dropdown can't offer a client who wasn't
+  // billable in the selected quarter and would render an empty table.
+  const clientOptions = fees
+    .map((f) => ({ id: f.clientId, name: f.clientName }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // A client selected in one quarter may not be billable in the next one
+  // chosen. Falling back to all clients keeps the table populated rather than
+  // showing an empty result under a still-selected name.
+  const clientInQuarter = fees.some((f) => f.clientId === clientFilter);
+  const visibleFees = clientFilter && clientInQuarter
+    ? fees.filter((f) => f.clientId === clientFilter)
+    : fees;
+
+  const selectedQuarter = quarters.find((q) => q.code === quarter);
 
   const handleGenerate = (tpl: ReportTemplate) => {
     setGenerating(tpl.id);
@@ -146,7 +197,34 @@ export default function ReportsPage() {
     }
   };
 
-  const totalFeeAmount = fees.reduce((sum, f) => sum + f.feeAmount, 0);
+  /**
+   * One workbook per visible client. Sequential rather than concurrent: each
+   * download is a separate browser save, and firing them all at once makes
+   * browsers drop all but the first.
+   */
+  const exportAll = async () => {
+    setExportingId(ALL_EXPORT_ID);
+    let failed = 0;
+    for (const fee of visibleFees) {
+      try {
+        await downloadClientFeeWorkbook(fee);
+      } catch {
+        failed += 1;
+      }
+    }
+    setExportingId(null);
+
+    if (failed > 0) {
+      toast({ tone: 'error', title: `${failed} of ${visibleFees.length} exports failed` });
+    } else {
+      toast({
+        tone: 'success',
+        title: `Exported ${visibleFees.length} fee schedule${visibleFees.length === 1 ? '' : 's'}`,
+      });
+    }
+  };
+
+  const totalFeeAmount = visibleFees.reduce((sum, f) => sum + f.feeAmount, 0);
 
   usePageHeading(
     {
@@ -204,11 +282,55 @@ export default function ReportsPage() {
 
         {/* Fee Schedule */}
         <Card padding="none">
-          <div className="px-5 py-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
             <CardHeader
               title="Fee Schedule"
-              subtitle={fees[0] ? `${fees[0].quarterLabel} · management fees, prorated by inception date` : 'Current-quarter management fees'}
+              subtitle={
+                selectedQuarter
+                  ? `${selectedQuarter.label} · ${
+                      selectedQuarter.closed
+                        ? 'closed — billed on quarter-end value'
+                        : 'in progress — estimated on live value'
+                    }, prorated by inception date`
+                  : 'Management fees, prorated by inception date'
+              }
             />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={clientFilter}
+                onChange={(e) => setClientFilter(e.target.value)}
+                aria-label="Client"
+              >
+                <option value="">All clients</option>
+                {clientOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={quarter}
+                onChange={(e) => setQuarter(e.target.value)}
+                aria-label="Quarter"
+              >
+                {quarters.map((q) => (
+                  <option key={q.code} value={q.code}>
+                    {q.label}
+                    {q.closed ? '' : ' (in progress)'}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Download className="h-3.5 w-3.5" />}
+                disabled={feesLoading || visibleFees.length === 0}
+                loading={exportingId === ALL_EXPORT_ID}
+                onClick={exportAll}
+              >
+                Export all
+              </Button>
+            </div>
           </div>
           <table className="w-full">
             <thead>
@@ -229,14 +351,14 @@ export default function ReportsPage() {
                     Loading…
                   </td>
                 </tr>
-              ) : fees.length === 0 ? (
+              ) : visibleFees.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                    No clients to bill.
+                    No clients were billable in {selectedQuarter?.label ?? 'this quarter'}.
                   </td>
                 </tr>
               ) : (
-                fees.map((f) => (
+                visibleFees.map((f) => (
                   <tr key={f.clientId} className="transition-colors hover:bg-surface-2">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
@@ -278,7 +400,7 @@ export default function ReportsPage() {
                 ))
               )}
             </tbody>
-            {!feesLoading && fees.length > 0 && (
+            {!feesLoading && visibleFees.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-border bg-surface-2">
                   <td className="px-5 py-3 text-[13px] font-semibold text-ink" colSpan={4}>
