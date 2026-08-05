@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { marketApi, SymbolNotFoundError } from '@/lib/market.api';
-import { Client } from '@/types';
+import { Client, Holding } from '@/types';
 import {
   formatCurrency,
   formatSignedCurrency,
@@ -75,6 +75,12 @@ export default function AddSymbolPage() {
 
   const [status, setStatus] = useState<LookupStatus>('idle');
   const [resolved, setResolved] = useState<{ company: string; exchange: string } | null>(null);
+
+  // The client's open lot in this ticker, when they have one. A sell is a
+  // disposal out of THIS position, so its P&L can only be measured against the
+  // basis recorded here — without it there is nothing to realise a gain against.
+  const [openLot, setOpenLot] = useState<Holding | null>(null);
+  const [lotLoading, setLotLoading] = useState(false);
 
   // Fields the user edited by hand. The lookup leaves these alone so an
   // in-flight response can't overwrite something typed while it was pending.
@@ -153,22 +159,103 @@ export default function AddSymbolPage() {
 
   useEffect(() => () => inflight.current?.abort(), []);
 
+  // Look up the client's open lot in this ticker. Runs for buys as well as
+  // sells: a buy into an existing position is averaged into it server-side, and
+  // showing the resulting blended basis beats letting it surprise the user
+  // after the fact.
+  useEffect(() => {
+    const ticker = form.ticker.trim().toUpperCase();
+    if (!form.clientId || !ticker) {
+      setOpenLot(null);
+      return;
+    }
+
+    let cancelled = false;
+    setLotLoading(true);
+
+    apiClient
+      .getClient()
+      .get<Holding[]>(`/holdings/client/${form.clientId}`)
+      .then((r) => {
+        if (cancelled) return;
+        const rows = Array.isArray(r.data) ? r.data : [];
+        const match = rows.find(
+          (h) => h.ticker?.toUpperCase() === ticker && h.quantity > 0,
+        );
+        setOpenLot(match ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenLot(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLotLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.clientId, form.ticker]);
+
   const qty = parseFloat(form.quantity) || 0;
   const amountInvested = parseFloat(form.amountInvested) || 0;
   const price = parseFloat(form.currentPrice) || 0;
   const isSell = form.side === 'sell';
 
-  // Avg. Cost is always derived, never entered.
-  const avgCost = qty > 0 ? amountInvested / qty : 0;
+  // On a buy this is the cost of the shares acquired. On a sell it is the gross
+  // proceeds, so it must never be divided into a per-share "cost" — the basis of
+  // sold shares comes from the lot being sold, not from this trade.
+  const avgCost = !isSell && qty > 0 ? amountInvested / qty : 0;
 
+  /**
+   * What a sell actually does, in the terms the accounting works in.
+   *
+   * Proceeds are what the sale brings in (quantity x sale price). The basis
+   * given up is that same quantity at the lot's average cost. The difference is
+   * REALISED — the shares are gone, so nothing about this trade is unrealised.
+   * Anything left in the lot keeps its original basis and stays unrealised,
+   * which is what the "Remaining" figures below describe.
+   */
   const preview = useMemo(() => {
+    if (isSell) {
+      const basisPerShare = openLot?.averageCost ?? 0;
+      // Proceeds follow the amount the user actually entered; the sale price is
+      // only the fallback when they have not typed an amount yet.
+      const proceeds = amountInvested > 0 ? amountInvested : qty * price;
+      const costOfSold = basisPerShare * qty;
+      const realized = proceeds - costOfSold;
+      const pct = costOfSold ? (realized / costOfSold) * 100 : 0;
+
+      const heldQty = openLot?.quantity ?? 0;
+      const remainingQty = heldQty - qty;
+      const oversold = openLot != null && remainingQty < 0;
+
+      return {
+        proceeds,
+        costOfSold,
+        basisPerShare,
+        realized,
+        pct,
+        heldQty,
+        remainingQty,
+        oversold,
+        // The unsold balance, still marked against the live price.
+        remainingValue: remainingQty > 0 ? remainingQty * price : 0,
+        remainingUnrealized:
+          remainingQty > 0 ? (price - basisPerShare) * remainingQty : 0,
+        salePrice: qty > 0 ? proceeds / qty : 0,
+      };
+    }
+
     const marketValue = qty * price;
     const cost = amountInvested;
-    // For a sell (short), P&L moves inversely to price.
-    const pnl = isSell ? cost - marketValue : marketValue - cost;
+    const pnl = marketValue - cost;
     const pct = cost ? (pnl / cost) * 100 : 0;
     return { marketValue, cost, pnl, pct };
-  }, [qty, amountInvested, price, isSell]);
+  }, [qty, amountInvested, price, isSell, openLot]);
+
+  // Narrowed views so the JSX below can read either shape without casts.
+  const sellView = isSell ? (preview as Extract<typeof preview, { realized: number }>) : null;
+  const buyView = !isSell ? (preview as Extract<typeof preview, { marketValue: number }>) : null;
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -181,8 +268,20 @@ export default function AddSymbolPage() {
     else if (status === 'notfound') e.ticker = 'Unknown ticker';
     if (!form.company.trim()) e.company = 'Company name is required';
     if (qty <= 0) e.quantity = 'Enter a quantity';
-    if (amountInvested <= 0) e.amountInvested = 'Enter the amount invested';
+    if (amountInvested <= 0) {
+      e.amountInvested = isSell ? 'Enter the sale proceeds' : 'Enter the amount invested';
+    }
     if (price <= 0) e.currentPrice = 'Enter current price';
+
+    // A sell has to come out of something. Catching it here keeps the user from
+    // losing the form to a 400 the server would raise for the same reason.
+    if (isSell && form.clientId && form.ticker.trim() && !lotLoading) {
+      if (!openLot) {
+        e.ticker = 'This client holds no open position in this ticker';
+      } else if (qty > openLot.quantity) {
+        e.quantity = `Only ${openLot.quantity} shares held`;
+      }
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -205,8 +304,13 @@ export default function AddSymbolPage() {
         theme: form.theme.trim(),
         exchange: form.exchange.trim(),
         quantity: isSell ? -qty : qty,
-        averageCost: avgCost,
-        currentPrice: price,
+        // On a sell the basis of the shares leaving is the lot's average cost —
+        // proceeds divided by quantity would overwrite the basis with the sale
+        // price and silently erase the gain being realised.
+        averageCost: isSell ? (openLot?.averageCost ?? 0) : avgCost,
+        // The price the sale actually executed at, derived from the proceeds
+        // entered rather than the last close, so realised P&L matches the ticket.
+        currentPrice: isSell && qty > 0 ? amountInvested / qty : price,
         // Dates the ledger row this creates. XIRR weights flows by date, so a
         // back-dated trade has to carry its own date rather than land on today.
         date: new Date(`${form.tradeDate}T00:00:00`).toISOString(),
@@ -215,7 +319,9 @@ export default function AddSymbolPage() {
       toast({
         tone: 'success',
         title: isSell ? 'Sell recorded' : 'Position added',
-        description: `${form.ticker.toUpperCase()} ${isSell ? 'sell' : 'buy'} saved.`,
+        description: sellView
+          ? `${form.ticker.toUpperCase()} — ${formatCurrency(sellView.proceeds)} proceeds, ${formatSignedCurrency(sellView.realized)} realised.`
+          : `${form.ticker.toUpperCase()} buy saved.`,
       });
       setTimeout(() => router.push('/holdings'), 800);
     } catch {
@@ -342,9 +448,12 @@ export default function AddSymbolPage() {
                   value={form.quantity}
                   onChange={(e) => set('quantity', e.target.value)}
                   error={errors.quantity}
+                  helper={
+                    isSell && openLot ? `${openLot.quantity} shares held` : undefined
+                  }
                 />
                 <Input
-                  label="Amount Invested"
+                  label={isSell ? 'Sale Proceeds' : 'Amount Invested'}
                   required
                   type="number"
                   step="0.01"
@@ -354,15 +463,28 @@ export default function AddSymbolPage() {
                   value={form.amountInvested}
                   onChange={(e) => set('amountInvested', e.target.value)}
                   error={errors.amountInvested}
+                  helper={isSell ? 'Gross amount the shares sold for' : undefined}
                 />
                 <Input
-                  label="Avg. Cost"
+                  label={isSell ? 'Avg. Cost (held)' : 'Avg. Cost'}
                   readOnly
                   tabIndex={-1}
                   placeholder="—"
                   rightAddon="USD"
-                  value={avgCost > 0 ? avgCost.toFixed(2) : ''}
-                  helper="Amount invested ÷ quantity"
+                  value={
+                    isSell
+                      ? openLot
+                        ? openLot.averageCost.toFixed(2)
+                        : ''
+                      : avgCost > 0
+                        ? avgCost.toFixed(2)
+                        : ''
+                  }
+                  helper={
+                    isSell
+                      ? 'Basis of the shares being sold'
+                      : 'Amount invested ÷ quantity'
+                  }
                   className="cursor-default bg-surface-2"
                 />
               </div>
@@ -438,7 +560,7 @@ export default function AddSymbolPage() {
           <div className="sticky top-24 space-y-6">
             <Card>
               <CardHeader
-                title="Position Preview"
+                title={isSell ? 'Sale Preview' : 'Position Preview'}
                 subtitle="Calculated in real time"
                 action={
                   <span
@@ -451,30 +573,158 @@ export default function AddSymbolPage() {
                   </span>
                 }
               />
-              <div className="mt-5 space-y-4">
-                <PreviewRow label="Market Value" value={formatCurrency(preview.marketValue)} strong />
-                <PreviewRow label={isSell ? 'Proceeds' : 'Amount Invested'} value={formatCurrency(preview.cost)} />
-                <PreviewRow label="Avg. Cost" value={avgCost > 0 ? formatCurrency(avgCost) : '—'} />
-                <div className="h-px bg-border" />
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] text-ink-secondary">Unrealized P&L</span>
-                  <span className={cn('text-sm font-semibold tabular-nums', preview.pnl >= 0 ? 'text-success' : 'text-danger')}>
-                    {formatSignedCurrency(preview.pnl)}
-                  </span>
+
+              {sellView ? (
+                <div className="mt-5 space-y-4">
+                  {!openLot && !lotLoading && form.clientId && form.ticker.trim() ? (
+                    <p className="rounded-[10px] bg-danger-soft px-3 py-2 text-[13px] text-danger">
+                      No open position in {form.ticker.toUpperCase()} for this client — there is
+                      nothing to sell against.
+                    </p>
+                  ) : null}
+
+                  {sellView.oversold ? (
+                    <p className="rounded-[10px] bg-danger-soft px-3 py-2 text-[13px] text-danger">
+                      Selling {qty} of {sellView.heldQty} shares held.
+                    </p>
+                  ) : null}
+
+                  <PreviewRow
+                    label="Market Value Sold"
+                    value={formatCurrency(sellView.proceeds)}
+                    strong
+                  />
+                  <PreviewRow
+                    label="Sale Price"
+                    value={sellView.salePrice > 0 ? formatCurrency(sellView.salePrice) : '—'}
+                  />
+                  <PreviewRow
+                    label="Cost of Shares Sold"
+                    value={sellView.costOfSold > 0 ? formatCurrency(sellView.costOfSold) : '—'}
+                  />
+                  <PreviewRow
+                    label="Avg. Cost (held)"
+                    value={
+                      sellView.basisPerShare > 0 ? formatCurrency(sellView.basisPerShare) : '—'
+                    }
+                  />
+
+                  <div className="h-px bg-border" />
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-medium text-ink">Realized P&amp;L</span>
+                    <span
+                      className={cn(
+                        'text-sm font-semibold tabular-nums',
+                        sellView.realized >= 0 ? 'text-success' : 'text-danger'
+                      )}
+                    >
+                      {formatSignedCurrency(sellView.realized)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] text-ink-secondary">Return on Cost</span>
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+                        sellView.pct >= 0
+                          ? 'bg-success-soft text-success'
+                          : 'bg-danger-soft text-danger'
+                      )}
+                    >
+                      <TrendingUp className="h-3 w-3" />
+                      {formatSignedPct(sellView.pct)}
+                    </span>
+                  </div>
+
+                  {openLot && !sellView.oversold ? (
+                    <>
+                      <div className="h-px bg-border" />
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-tertiary">
+                        After this trade
+                      </p>
+                      <PreviewRow
+                        label="Shares Remaining"
+                        value={`${+sellView.remainingQty.toFixed(4)}`}
+                      />
+                      <PreviewRow
+                        label="Remaining Value"
+                        value={
+                          sellView.remainingQty > 0
+                            ? formatCurrency(sellView.remainingValue)
+                            : formatCurrency(0)
+                        }
+                      />
+                      {sellView.remainingQty > 0 ? (
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px] text-ink-secondary">
+                            Unrealized P&amp;L
+                          </span>
+                          <span
+                            className={cn(
+                              'text-sm font-semibold tabular-nums',
+                              sellView.remainingUnrealized >= 0 ? 'text-success' : 'text-danger'
+                            )}
+                          >
+                            {formatSignedCurrency(sellView.remainingUnrealized)}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-[12px] text-ink-tertiary">
+                          Position fully closed.
+                        </p>
+                      )}
+                    </>
+                  ) : null}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] text-ink-secondary">Return</span>
-                  <span
-                    className={cn(
-                      'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
-                      preview.pct >= 0 ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'
-                    )}
-                  >
-                    <TrendingUp className="h-3 w-3" />
-                    {formatSignedPct(preview.pct)}
-                  </span>
+              ) : (
+                <div className="mt-5 space-y-4">
+                  <PreviewRow
+                    label="Market Value"
+                    value={formatCurrency(buyView?.marketValue ?? 0)}
+                    strong
+                  />
+                  <PreviewRow
+                    label="Amount Invested"
+                    value={formatCurrency(buyView?.cost ?? 0)}
+                  />
+                  <PreviewRow label="Avg. Cost" value={avgCost > 0 ? formatCurrency(avgCost) : '—'} />
+
+                  {openLot ? (
+                    <p className="rounded-[10px] bg-surface-2 px-3 py-2 text-[12px] text-ink-secondary">
+                      Adding to an existing {openLot.quantity}-share position at{' '}
+                      {formatCurrency(openLot.averageCost)} — the basis will be averaged.
+                    </p>
+                  ) : null}
+
+                  <div className="h-px bg-border" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] text-ink-secondary">Unrealized P&L</span>
+                    <span
+                      className={cn(
+                        'text-sm font-semibold tabular-nums',
+                        (buyView?.pnl ?? 0) >= 0 ? 'text-success' : 'text-danger'
+                      )}
+                    >
+                      {formatSignedCurrency(buyView?.pnl ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] text-ink-secondary">Return</span>
+                    <span
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+                        (buyView?.pct ?? 0) >= 0
+                          ? 'bg-success-soft text-success'
+                          : 'bg-danger-soft text-danger'
+                      )}
+                    >
+                      <TrendingUp className="h-3 w-3" />
+                      {formatSignedPct(buyView?.pct ?? 0)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
             </Card>
 
             <div className="flex flex-col gap-3">
