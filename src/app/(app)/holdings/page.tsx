@@ -131,6 +131,25 @@ interface SymbolNonHolderRow {
   cashBalance: number;
 }
 
+/**
+ * Drops fully-exited positions from a holdings payload.
+ *
+ * The API already filters these, so this is a second line of defence rather
+ * than the fix: a sold-out lot keeps its row in the database (it carries the
+ * realized P&L the sale booked), and the one thing it must never do is come
+ * back as a $0.00 line on the holdings table or in an exported workbook.
+ *
+ * Fractional quantities mean a full exit rarely nets to exactly 0 — the
+ * subtraction leaves float dust — so this compares against an epsilon, matching
+ * the threshold the API uses for the same judgement.
+ */
+const CLOSED_POSITION_EPSILON = 1e-9;
+
+function openPositions<T extends { quantity: number }>(rows: T[]): T[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((h) => Math.abs(Number(h.quantity) || 0) > CLOSED_POSITION_EPSILON);
+}
+
 export default function HoldingsPage() {
   const { toast } = useToast();
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
@@ -167,7 +186,7 @@ export default function HoldingsPage() {
   async function loadHoldings() {
     try {
       const res = await apiClient.getClient().get('/holdings');
-      setHoldings(res.data);
+      setHoldings(openPositions(res.data));
     } catch {
       toast({ tone: 'error', title: 'Failed to load holdings' });
     } finally {
@@ -288,7 +307,7 @@ export default function HoldingsPage() {
       const asOfDate = new Date(historicalDate);
       const historicalHoldings = await holdingsApi.getPortfolioAsOfDate(activeClient.clientId, asOfDate);
 
-      const rows: ClientPositionRow[] = historicalHoldings
+      const rows: ClientPositionRow[] = openPositions<any>(historicalHoldings)
         .sort((a: any, b: any) => b.marketValue - a.marketValue)
         .map((h: any, i: number) => {
           const costBasisTotal = h.averageCost * h.quantity;

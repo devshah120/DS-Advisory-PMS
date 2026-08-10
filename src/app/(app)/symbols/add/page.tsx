@@ -201,6 +201,34 @@ export default function AddSymbolPage() {
   const price = parseFloat(form.currentPrice) || 0;
   const isSell = form.side === 'sell';
 
+  /**
+   * Fills the ticket to close the position out completely.
+   *
+   * Quantity is copied from the lot verbatim rather than rounded — a lot of
+   * 46.414 shares only closes to exactly zero if all 46.414 are sold, and a
+   * tidied 46.41 would leave a fractional stub behind that still renders as an
+   * open position.
+   *
+   * Proceeds are seeded at the current price because the field is required and
+   * a market exit is the common case; the user can still overwrite it with the
+   * actual fill before submitting, which is why this is a starting point rather
+   * than a locked value.
+   */
+  const sellAll = () => {
+    if (!openLot) return;
+    set('quantity', String(openLot.quantity));
+    const atPrice = price > 0 ? price : openLot.currentPrice;
+    if (atPrice > 0) {
+      // toFixed(2) matches the field's own step, so the seeded figure is one
+      // the user could have typed themselves.
+      set('amountInvested', (openLot.quantity * atPrice).toFixed(2));
+    }
+  };
+
+  /** True when the ticket already closes the whole lot, within float dust. */
+  const isFullExit =
+    isSell && openLot != null && qty > 0 && Math.abs(openLot.quantity - qty) < 1e-9;
+
   // On a buy this is the cost of the shares acquired. On a sell it is the gross
   // proceeds, so it must never be divided into a per-share "cost" — the basis of
   // sold shares comes from the lot being sold, not from this trade.
@@ -278,7 +306,10 @@ export default function AddSymbolPage() {
     if (isSell && form.clientId && form.ticker.trim() && !lotLoading) {
       if (!openLot) {
         e.ticker = 'This client holds no open position in this ticker';
-      } else if (qty > openLot.quantity) {
+      } else if (qty - openLot.quantity > 1e-9) {
+        // Tolerance rather than a bare `>`: "Sell All" fills the quantity from
+        // the lot itself, and a strict comparison can reject that exact figure
+        // on float dust alone.
         e.quantity = `Only ${openLot.quantity} shares held`;
       }
     }
@@ -448,8 +479,32 @@ export default function AddSymbolPage() {
                   value={form.quantity}
                   onChange={(e) => set('quantity', e.target.value)}
                   error={errors.quantity}
+                  // Only offered on a sell with something to sell: on a buy
+                  // there is no "all" to mean anything, and with no open lot
+                  // the button would have nothing to fill from.
+                  rightAddon={
+                    isSell && openLot && openLot.quantity > 0 ? (
+                      <button
+                        type="button"
+                        onClick={sellAll}
+                        title={`Sell the full ${openLot.quantity} shares held`}
+                        className={cn(
+                          'pointer-events-auto rounded-[6px] px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide transition-colors',
+                          isFullExit
+                            ? 'bg-danger text-white'
+                            : 'bg-danger-soft text-danger hover:bg-danger hover:text-white'
+                        )}
+                      >
+                        All
+                      </button>
+                    ) : undefined
+                  }
                   helper={
-                    isSell && openLot ? `${openLot.quantity} shares held` : undefined
+                    isSell && openLot
+                      ? isFullExit
+                        ? `Closing the full ${openLot.quantity}-share position`
+                        : `${openLot.quantity} shares held`
+                      : undefined
                   }
                 />
                 <Input
