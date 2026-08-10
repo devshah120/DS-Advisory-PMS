@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  isValidElement,
   useCallback,
   useContext,
   useEffect,
@@ -42,6 +43,66 @@ const PageHeaderContext = createContext<PageHeaderStore | null>(null);
  */
 const headingTextKey = (h: PageHeading) => `${h.title ?? ''} ${h.subtitle ?? ''}`;
 
+/**
+ * Identity of the *props* the action elements were built from.
+ *
+ * The ref gives the layout fresh closures for free, but only if the layout
+ * re-renders at all. For a stateless button that never matters -- clicking it
+ * fires the handler and the page re-renders itself. For a *controlled* input in
+ * the header (the client `<Select>` on Performance) it matters completely: its
+ * displayed value comes from page state, so if the shell never re-renders it
+ * keeps painting the element built from the previous value and the dropdown
+ * appears frozen on the old selection while the page below it updates.
+ *
+ * Diffing the whole element is impractical, but the part that decides what the
+ * user sees -- the props of the top-level action elements -- is shallow,
+ * primitive-valued, and cheap to key. Function props are skipped: they are new
+ * identities on every render, and including them would bump the version on
+ * every publish, which is exactly the infinite loop described in `set`.
+ */
+const actionsStateKey = (actions: ReactNode): string => {
+  const parts: string[] = [];
+
+  const walk = (node: ReactNode, depth: number) => {
+    // Depth-capped: this runs after every render of every page, and the header
+    // holds a handful of controls, not a tree.
+    if (depth > 4 || node == null || typeof node === 'boolean') return;
+
+    if (typeof node === 'string' || typeof node === 'number') {
+      parts.push(String(node));
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach((child) => walk(child, depth + 1));
+      return;
+    }
+
+    if (!isValidElement(node)) return;
+
+    const props = node.props as Record<string, unknown>;
+    for (const key of Object.keys(props).sort()) {
+      if (key === 'children') continue;
+      const v = props[key];
+      // Only primitives: functions are unstable by nature, objects and elements
+      // are handled by recursing into children below.
+      if (
+        typeof v === 'string' ||
+        typeof v === 'number' ||
+        typeof v === 'boolean' ||
+        v === null
+      ) {
+        parts.push(`${key}=${String(v)}`);
+      }
+    }
+
+    walk(props.children as ReactNode, depth + 1);
+  };
+
+  walk(actions, 0);
+  return parts.join('|');
+};
+
 export function PageHeaderProvider({ children }: { children: ReactNode }) {
   // The live heading. Held in a ref so a page publishing on every render never
   // by itself schedules a re-render of the whole shell.
@@ -62,8 +123,16 @@ export function PageHeaderProvider({ children }: { children: ReactNode }) {
     // bumping the version on every call re-renders the page, which calls this
     // again -- an infinite loop that hangs the tab on any page heavy enough
     // that one render costs real time.
+    //
+    // `actionsStateKey` is the third term because presence alone is too coarse
+    // for controlled inputs: a `<Select>` whose `value` moved from one client to
+    // the next is still "has actions", so the shell never re-rendered and the
+    // dropdown stayed stuck on the old name. The key is built from primitive
+    // props only, so it converges -- equal renders produce equal keys.
     const changed =
-      headingTextKey(prev) !== headingTextKey(next) || !!prev.actions !== !!next.actions;
+      headingTextKey(prev) !== headingTextKey(next) ||
+      !!prev.actions !== !!next.actions ||
+      actionsStateKey(prev.actions) !== actionsStateKey(next.actions);
     current.current = next;
     if (changed) setVersion((v) => v + 1);
   }, []);
