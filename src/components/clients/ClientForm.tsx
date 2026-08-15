@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Building2,
   User,
@@ -12,10 +12,22 @@ import {
   Percent,
   CalendarDays,
   Lock,
+  Users,
 } from 'lucide-react';
 import { CreateClientInput, parseApiError } from '@/lib/clients.api';
-import { RiskProfile } from '@/types';
+import { familiesApi } from '@/lib/families.api';
+import { Family, RiskProfile } from '@/types';
+import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, Input, Select, Textarea, Button, Badge, useToast } from '@/components/ui';
+
+/**
+ * Sentinel for the "create a new household" option in the family dropdown.
+ *
+ * Managers group accounts as they onboard them — the second account of a family
+ * is added right after the first — so making them leave the form, create a
+ * family elsewhere and come back would be the wrong shape entirely.
+ */
+const NEW_FAMILY = '__new__';
 
 export interface ClientFormValues {
   name: string;
@@ -31,6 +43,13 @@ export interface ClientFormValues {
   currency: string;
   /** Manually maintained buying-power balance. Blank means "none entered". */
   cashBalance: string;
+  /**
+   * The household this mandate belongs to. Empty means standalone; NEW_FAMILY
+   * means "create the one named in `newFamilyName`" on submit.
+   */
+  familyId: string;
+  /** Only read when `familyId` is NEW_FAMILY. */
+  newFamilyName: string;
   notes: string;
 }
 
@@ -46,6 +65,8 @@ export const emptyClientForm: ClientFormValues = {
   inceptionDate: '',
   currency: 'USD',
   cashBalance: '',
+  familyId: '',
+  newFamilyName: '',
   notes: '',
 };
 
@@ -63,9 +84,28 @@ export default function ClientForm({
   onCancel,
 }: ClientFormProps) {
   const { toast } = useToast();
+  // Households are per book, so only the selected book's families are offered —
+  // the API rejects a cross-book member anyway, and offering one would be a
+  // dead end the manager only discovers on submit.
+  const { market, meta, ready: marketReady } = useMarket();
   const [form, setForm] = useState<ClientFormValues>(initial);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [families, setFamilies] = useState<Family[]>([]);
+
+  useEffect(() => {
+    if (!marketReady) return;
+    let mounted = true;
+    familiesApi
+      .list(market)
+      .then((rows) => mounted && setFamilies(rows))
+      // A failed load leaves the dropdown with just "None" and "Create new" —
+      // the manager can still onboard the client and group it later.
+      .catch(() => mounted && setFamilies([]));
+    return () => {
+      mounted = false;
+    };
+  }, [market, marketReady]);
 
   const set = <K extends keyof ClientFormValues>(k: K, v: ClientFormValues[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -100,6 +140,10 @@ export default function ClientForm({
     // Cash is optional, but if entered it must be a non-negative number.
     if (form.cashBalance.trim() !== '' && (Number.isNaN(Number(form.cashBalance)) || Number(form.cashBalance) < 0))
       e.cashBalance = 'Cash balance must be a number of 0 or more';
+    // Choosing "Create new family" without naming it would create a nameless
+    // household, so the name becomes required exactly then.
+    if (form.familyId === NEW_FAMILY && !form.newFamilyName.trim())
+      e.newFamilyName = 'Name the new family';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -111,8 +155,33 @@ export default function ClientForm({
     setLoading(true);
     setErrors({});
 
+    // Resolve "create new" into a real family id first, so the client write
+    // carries a valid FK. Done before the client call rather than after, since
+    // a client saved without its household would silently lose the grouping the
+    // manager just asked for.
+    let familyId: string | null = form.familyId === NEW_FAMILY ? null : form.familyId || null;
+    if (form.familyId === NEW_FAMILY) {
+      try {
+        const created = await familiesApi.create({
+          name: form.newFamilyName.trim(),
+          market,
+        });
+        familyId = created.id;
+        setFamilies((prev) => [...prev, created]);
+      } catch (err) {
+        const { message, fields } = parseApiError(err);
+        setErrors({ ...fields, newFamilyName: fields.name ?? message });
+        toast({ tone: 'error', title: 'Could not create the family', description: message });
+        setLoading(false);
+        return;
+      }
+    }
+
     // Send exactly the fields the API accepts — the backend rejects unknown keys.
     const payload: CreateClientInput = {
+      // Always sent, including as null, so clearing the field detaches the
+      // client from its household rather than leaving the old link in place.
+      familyId,
       name: form.name.trim(),
       broker: form.broker.trim(),
       accountNumber: form.accountNumber.trim(),
@@ -280,6 +349,36 @@ export default function ClientForm({
             error={errors.cashBalance}
             helper="Uninvested cash you're holding for this client. Counts toward Portfolio Value; excluded from XIRR (idle cash isn't deployed capital)."
           />
+          <Select
+            label="Family"
+            value={form.familyId}
+            onChange={(e) => set('familyId', e.target.value)}
+            error={errors.familyId}
+            helper={`Group accounts that belong to one household. The family appears alongside individual clients on Holdings, showing their combined positions. ${meta.label} book only.`}
+          >
+            <option value="">None — standalone account</option>
+            {families.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+                {f.memberCount > 0
+                  ? ` · ${f.memberCount} account${f.memberCount === 1 ? '' : 's'}`
+                  : ''}
+              </option>
+            ))}
+            <option value={NEW_FAMILY}>+ Create a new family…</option>
+          </Select>
+          {form.familyId === NEW_FAMILY && (
+            <Input
+              label="New Family Name"
+              required
+              placeholder="Shah Family"
+              leftIcon={<Users className="h-4 w-4" />}
+              value={form.newFamilyName}
+              onChange={(e) => set('newFamilyName', e.target.value)}
+              error={errors.newFamilyName}
+              helper={`Created in the ${meta.label} book when you save, with this client as its first member`}
+            />
+          )}
         </div>
         <div className="mt-5">
           <Textarea

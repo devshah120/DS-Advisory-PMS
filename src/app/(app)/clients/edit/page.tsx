@@ -52,6 +52,10 @@ function EditClientPageInner() {
           currency: client.currency,
           // Prefill the maintained cash so editing doesn't wipe it; 0 shows as blank.
           cashBalance: client.cashBalance ? String(client.cashBalance) : '',
+          // Prefilled so saving an unrelated edit doesn't detach the client
+          // from its household.
+          familyId: client.familyId ?? '',
+          newFamilyName: '',
           notes: client.notes ?? '',
         });
       } catch {

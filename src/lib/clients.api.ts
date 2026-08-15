@@ -7,6 +7,7 @@ import {
   RiskProfile,
   ClientStatus,
 } from '@/types';
+import type { Market } from './market-scope';
 
 export interface CreateClientInput {
   name: string;
@@ -28,7 +29,20 @@ export interface CreateClientInput {
   feeRatePercent: number;
   /** Required: ISO date string. The mandate's actual start date, not when the record was created. */
   inceptionDate: string;
+  /**
+   * Which book the mandate belongs to. Omitted means the US book (the server's
+   * default); the add-client form sends the currently-selected market so a
+   * client created while viewing India lands in the Indian book. The currency
+   * follows from this on the server unless one is named explicitly.
+   */
+  market?: Market;
   currency?: string;
+  /**
+   * The household this mandate joins, if any. Send null to detach it. The
+   * family must be in the same book as the client — the API rejects a mismatch
+   * rather than summing two currencies into one total.
+   */
+  familyId?: string | null;
   status?: ClientStatus;
   cashBalance?: number;
   portfolioValue?: number;
@@ -94,7 +108,8 @@ export function parseApiError(err: unknown): ApiFieldErrors {
 }
 
 export const clientsApi = {
-  async list(params?: { page?: number; limit?: number }) {
+  /** `market` narrows the list to one book; omit it to list every client. */
+  async list(params?: { page?: number; limit?: number; market?: Market }) {
     const res = await apiClient
       .getClient()
       .get<PaginatedResponse<Client> | Client[]>('/clients', { params });

@@ -21,6 +21,8 @@ import {
   cn,
 } from '@/lib/utils';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
+import { displayTicker } from '@/lib/market-scope';
 import { Card, CardHeader, Input, Select, Button, useToast } from '@/components/ui';
 
 /** Today in the yyyy-mm-dd shape a date input expects, in local time. */
@@ -64,7 +66,17 @@ type LookupStatus = 'idle' | 'loading' | 'found' | 'notfound' | 'error';
 const DEBOUNCE_MS = 500;
 
 export default function AddSymbolPage() {
-  usePageHeading({ title: "Add Position", subtitle: "Record a new holding for a client account" });
+  // The book decides how a bare ticker resolves — "RELIANCE" is only a valid
+  // symbol under the Indian book, where it qualifies to RELIANCE.NS.
+  const { market, meta } = useMarket();
+  // Every preview figure on this form — proceeds, basis, realised P&L — is in
+  // the book's currency, so an Indian position previews in rupees.
+  const currency = meta.currency;
+
+  usePageHeading({
+    title: 'Add Position',
+    subtitle: `Record a new holding for a client account · ${meta.label} book`,
+  });
 
   const router = useRouter();
   const { toast } = useToast();
@@ -74,7 +86,9 @@ export default function AddSymbolPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [status, setStatus] = useState<LookupStatus>('idle');
-  const [resolved, setResolved] = useState<{ company: string; exchange: string } | null>(null);
+  const [resolved, setResolved] = useState<
+    { company: string; exchange: string; symbol: string } | null
+  >(null);
 
   // The client's open lot in this ticker, when they have one. A sell is a
   // disposal out of THIS position, so its P&L can only be measured against the
@@ -87,13 +101,15 @@ export default function AddSymbolPage() {
   const touched = useRef<Set<string>>(new Set());
   const inflight = useRef<AbortController | null>(null);
 
+  // Only the selected book's clients are offered, so a position can't be filed
+  // against a mandate from the other book.
   useEffect(() => {
     apiClient
       .getClient()
-      .get('/clients')
+      .get('/clients', { params: { market } })
       .then((r) => setClients(r.data.data || r.data))
       .catch(() => {});
-  }, []);
+  }, [market]);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -113,12 +129,17 @@ export default function AddSymbolPage() {
 
     setStatus('loading');
     try {
-      const data = await marketApi.lookup(ticker, controller.signal);
+      const data = await marketApi.lookup(ticker, market, controller.signal);
       if (controller.signal.aborted) return;
 
       setForm((prev) => {
-        // A later keystroke may have changed the ticker while this was in flight.
-        if (prev.ticker.trim().toUpperCase() !== data.ticker) return prev;
+        // A later keystroke may have changed the ticker while this was in
+        // flight. Compare against BOTH forms of the resolved symbol: under the
+        // Indian book the user typed "RELIANCE" while the server answers
+        // "RELIANCE.NS", and matching only the qualified form would discard
+        // every Indian lookup as stale.
+        const typed = prev.ticker.trim().toUpperCase();
+        if (typed !== data.ticker && typed !== data.displayTicker) return prev;
 
         const next = { ...prev };
         for (const field of AUTOFILLED) {
@@ -135,14 +156,17 @@ export default function AddSymbolPage() {
       });
 
       setErrors((e) => ({ ...e, ticker: '', company: '' }));
-      setResolved({ company: data.company, exchange: data.exchange });
+      // `symbol` is the fully-qualified form the position must be SAVED under —
+      // an Indian holding stored as "RELIANCE" instead of "RELIANCE.NS" would
+      // never resolve a price again.
+      setResolved({ company: data.company, exchange: data.exchange, symbol: data.ticker });
       setStatus('found');
     } catch (err) {
       if (controller.signal.aborted) return;
       setResolved(null);
       setStatus(err instanceof SymbolNotFoundError ? 'notfound' : 'error');
     }
-  }, []);
+  }, [market]);
 
   // Debounce so a fast typist doesn't fire a request per keystroke.
   useEffect(() => {
@@ -179,8 +203,15 @@ export default function AddSymbolPage() {
       .then((r) => {
         if (cancelled) return;
         const rows = Array.isArray(r.data) ? r.data : [];
+        // Holdings are stored fully qualified, so a typed "RELIANCE" has to be
+        // matched against the stored "RELIANCE.NS" too — otherwise a sell into
+        // an existing Indian lot would find nothing and be rejected as having
+        // no open position.
         const match = rows.find(
-          (h) => h.ticker?.toUpperCase() === ticker && h.quantity > 0,
+          (h) =>
+            h.quantity > 0 &&
+            (h.ticker?.toUpperCase() === ticker ||
+              displayTicker(h.ticker ?? '') === ticker),
         );
         setOpenLot(match ?? null);
       })
@@ -327,7 +358,10 @@ export default function AddSymbolPage() {
       // existing ticker is averaged into it there.
       await apiClient.getClient().post('/holdings', {
         clientId: form.clientId,
-        ticker: form.ticker.trim().toUpperCase(),
+        // The RESOLVED symbol, so an Indian position is stored fully qualified
+        // ('RELIANCE.NS') and stays priceable. Falls back to what was typed when
+        // no lookup succeeded — the same behaviour as before this book existed.
+        ticker: resolved?.symbol ?? form.ticker.trim().toUpperCase(),
         company: form.company.trim(),
         sector: form.sector.trim(),
         industry: form.industry.trim(),
@@ -351,7 +385,7 @@ export default function AddSymbolPage() {
         tone: 'success',
         title: isSell ? 'Sell recorded' : 'Position added',
         description: sellView
-          ? `${form.ticker.toUpperCase()} — ${formatCurrency(sellView.proceeds)} proceeds, ${formatSignedCurrency(sellView.realized)} realised.`
+          ? `${form.ticker.toUpperCase()} — ${formatCurrency(sellView.proceeds, currency)} proceeds, ${formatSignedCurrency(sellView.realized, currency)} realised.`
           : `${form.ticker.toUpperCase()} buy saved.`,
       });
       setTimeout(() => router.push('/holdings'), 800);
@@ -514,7 +548,7 @@ export default function AddSymbolPage() {
                   step="0.01"
                   min="0"
                   placeholder="15000.00"
-                  rightAddon="USD"
+                  rightAddon={currency}
                   value={form.amountInvested}
                   onChange={(e) => set('amountInvested', e.target.value)}
                   error={errors.amountInvested}
@@ -525,7 +559,7 @@ export default function AddSymbolPage() {
                   readOnly
                   tabIndex={-1}
                   placeholder="—"
-                  rightAddon="USD"
+                  rightAddon={currency}
                   value={
                     isSell
                       ? openLot
@@ -551,7 +585,7 @@ export default function AddSymbolPage() {
                 step="0.01"
                 min="0"
                 placeholder="175.00"
-                rightAddon="USD"
+                rightAddon={currency}
                 value={form.currentPrice}
                 onChange={(e) => setManual('currentPrice', e.target.value)}
                 error={errors.currentPrice}
@@ -646,21 +680,21 @@ export default function AddSymbolPage() {
 
                   <PreviewRow
                     label="Market Value Sold"
-                    value={formatCurrency(sellView.proceeds)}
+                    value={formatCurrency(sellView.proceeds, currency)}
                     strong
                   />
                   <PreviewRow
                     label="Sale Price"
-                    value={sellView.salePrice > 0 ? formatCurrency(sellView.salePrice) : '—'}
+                    value={sellView.salePrice > 0 ? formatCurrency(sellView.salePrice, currency) : '—'}
                   />
                   <PreviewRow
                     label="Cost of Shares Sold"
-                    value={sellView.costOfSold > 0 ? formatCurrency(sellView.costOfSold) : '—'}
+                    value={sellView.costOfSold > 0 ? formatCurrency(sellView.costOfSold, currency) : '—'}
                   />
                   <PreviewRow
                     label="Avg. Cost (held)"
                     value={
-                      sellView.basisPerShare > 0 ? formatCurrency(sellView.basisPerShare) : '—'
+                      sellView.basisPerShare > 0 ? formatCurrency(sellView.basisPerShare, currency) : '—'
                     }
                   />
 
@@ -674,7 +708,7 @@ export default function AddSymbolPage() {
                         sellView.realized >= 0 ? 'text-success' : 'text-danger'
                       )}
                     >
-                      {formatSignedCurrency(sellView.realized)}
+                      {formatSignedCurrency(sellView.realized, currency)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -706,8 +740,8 @@ export default function AddSymbolPage() {
                         label="Remaining Value"
                         value={
                           sellView.remainingQty > 0
-                            ? formatCurrency(sellView.remainingValue)
-                            : formatCurrency(0)
+                            ? formatCurrency(sellView.remainingValue, currency)
+                            : formatCurrency(0, currency)
                         }
                       />
                       {sellView.remainingQty > 0 ? (
@@ -721,7 +755,7 @@ export default function AddSymbolPage() {
                               sellView.remainingUnrealized >= 0 ? 'text-success' : 'text-danger'
                             )}
                           >
-                            {formatSignedCurrency(sellView.remainingUnrealized)}
+                            {formatSignedCurrency(sellView.remainingUnrealized, currency)}
                           </span>
                         </div>
                       ) : (
@@ -736,19 +770,19 @@ export default function AddSymbolPage() {
                 <div className="mt-5 space-y-4">
                   <PreviewRow
                     label="Market Value"
-                    value={formatCurrency(buyView?.marketValue ?? 0)}
+                    value={formatCurrency(buyView?.marketValue ?? 0, currency)}
                     strong
                   />
                   <PreviewRow
                     label="Amount Invested"
-                    value={formatCurrency(buyView?.cost ?? 0)}
+                    value={formatCurrency(buyView?.cost ?? 0, currency)}
                   />
-                  <PreviewRow label="Avg. Cost" value={avgCost > 0 ? formatCurrency(avgCost) : '—'} />
+                  <PreviewRow label="Avg. Cost" value={avgCost > 0 ? formatCurrency(avgCost, currency) : '—'} />
 
                   {openLot ? (
                     <p className="rounded-[10px] bg-surface-2 px-3 py-2 text-[12px] text-ink-secondary">
                       Adding to an existing {openLot.quantity}-share position at{' '}
-                      {formatCurrency(openLot.averageCost)} — the basis will be averaged.
+                      {formatCurrency(openLot.averageCost, currency)} — the basis will be averaged.
                     </p>
                   ) : null}
 
@@ -761,7 +795,7 @@ export default function AddSymbolPage() {
                         (buyView?.pnl ?? 0) >= 0 ? 'text-success' : 'text-danger'
                       )}
                     >
-                      {formatSignedCurrency(buyView?.pnl ?? 0)}
+                      {formatSignedCurrency(buyView?.pnl ?? 0, currency)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

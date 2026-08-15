@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, Equal, Wallet } from 'lucide-react';
 import { clientsApi, parseApiError } from '@/lib/clients.api';
 import { formatCurrency, cn } from '@/lib/utils';
+import { useCurrency } from '@/components/layout/MarketContext';
 import { Client } from '@/types';
 import { Modal, Input, Select, Button, useToast } from '@/components/ui';
 
@@ -53,6 +54,12 @@ export function CashFlowModal({
   );
   const currentCash = selected?.cashBalance ?? 0;
 
+  // The chosen client's own reporting currency, falling back to the selected
+  // book's before anyone is picked. Read off the client rather than the book so
+  // the figure is right even in an unscoped list showing both.
+  const bookCurrency = useCurrency();
+  const currency = selected?.currency ?? bookCurrency;
+
   // Pre-fill the Set field with the current balance when a client is picked, so
   // the common "adjust the existing figure" edit starts from the real number
   // rather than a blank the manager might read as "current cash is zero".
@@ -96,7 +103,7 @@ export function CashFlowModal({
     if (next !== null && next < 0) {
       // A withdrawal can't take a client below zero cash — that would be spending
       // money they don't have on hand.
-      e.amount = `That leaves a negative balance (${formatCurrency(next)}). The client only holds ${formatCurrency(currentCash)}.`;
+      e.amount = `That leaves a negative balance (${formatCurrency(next, currency)}). The client only holds ${formatCurrency(currentCash, currency)}.`;
     }
 
     setErrors(e);
@@ -109,7 +116,7 @@ export function CashFlowModal({
       toast({
         tone: 'success',
         title: 'Cash balance updated',
-        description: `${updated.name} now holds ${formatCurrency(next)} in deployable cash.`,
+        description: `${updated.name} now holds ${formatCurrency(next, currency)} in deployable cash.`,
       });
       close();
     } catch (err) {
@@ -166,7 +173,7 @@ export function CashFlowModal({
             <div className="rounded-[12px] border border-border bg-surface-2 px-4 py-3">
               <p className="text-xs text-ink-secondary">Current deployable cash</p>
               <p className="value-display text-lg font-semibold text-ink">
-                {formatCurrency(currentCash)}
+                {formatCurrency(currentCash, currency)}
               </p>
             </div>
           )}
@@ -226,7 +233,7 @@ export function CashFlowModal({
             <div className="flex items-center justify-between rounded-[12px] border border-border bg-surface-2 px-4 py-3">
               <span className="text-[13px] text-ink-secondary">New balance after saving</span>
               <span className="value-display text-base font-semibold text-ink">
-                {formatCurrency(preview)}
+                {formatCurrency(preview, currency)}
               </span>
             </div>
           )}

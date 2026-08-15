@@ -22,6 +22,8 @@ import { Dropdown } from '@/components/ui/Dropdown';
 import { clientsApi } from '@/lib/clients.api';
 import { usersApi, type UserProfile } from '@/lib/users.api';
 import { cn } from '@/lib/utils';
+import { useMarket } from './MarketContext';
+import { ALL_MARKETS, MARKET_META } from '@/lib/market-scope';
 import type { Client } from '@/types';
 
 interface HeaderProps {
@@ -64,6 +66,7 @@ const notifications = [
 export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { market, meta, setMarket, ready: marketReady } = useMarket();
   const [clients, setClients] = useState<Client[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -84,13 +87,22 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
     };
   }, []);
 
+  // Re-fetched whenever the book changes: the client switcher must only offer
+  // clients from the selected market, otherwise picking a US client while the
+  // India book is showing would put the two selectors in contradiction.
   useEffect(() => {
+    if (!marketReady) return;
     let active = true;
     clientsApi
-      .list({ limit: 100 })
+      .list({ limit: 100, market })
       .then((list) => {
         if (!active) return;
         setClients(list);
+        // Drop a selection that doesn't exist in the newly-selected book,
+        // rather than leaving a stale name in the button.
+        setWorkspaceId((current) =>
+          current && list.some((c) => c.id === current) ? current : null,
+        );
       })
       .catch(() => {
         /* leave the switcher empty if clients can't be loaded */
@@ -98,7 +110,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [market, marketReady]);
 
   const workspace = clients.find((c) => c.id === workspaceId) ?? null;
   const workspaceName = workspace?.name ?? 'Select client';
@@ -143,6 +155,34 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
           ⌘K
         </kbd>
       </button>
+
+      {/* Country / book selector — scopes every figure in the app to one market. */}
+      <Dropdown
+        width={220}
+        items={ALL_MARKETS.map((code) => {
+          const m = MARKET_META[code];
+          return {
+            label: `${m.flag}  ${m.label}`,
+            icon:
+              code === market ? (
+                <Check className="h-4 w-4 text-brand" />
+              ) : (
+                <span className="h-4 w-4" />
+              ),
+            onClick: () => setMarket(code),
+          };
+        })}
+        trigger={
+          <button
+            className="flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
+            title={`Showing the ${meta.label} book (${meta.currency})`}
+          >
+            <span className="text-[15px] leading-none">{meta.flag}</span>
+            <span className="hidden sm:inline">{meta.shortLabel}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
+          </button>
+        }
+      />
 
       {/* Workspace selector */}
       <Dropdown

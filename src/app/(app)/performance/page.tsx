@@ -26,6 +26,7 @@ import {
   formatSignedCurrency,
 } from '@/lib/utils';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket, useCurrency } from '@/components/layout/MarketContext';
 import {
   Badge,
   Button,
@@ -46,6 +47,7 @@ const signedPct = (v: number, dp = 2) =>
 
 export default function PerformancePage() {
   const { toast } = useToast();
+  const { market, ready: marketReady } = useMarket();
 
   const [clients, setClients] = useState<Client[] | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
@@ -55,12 +57,20 @@ export default function PerformancePage() {
   const [view, setView] = useState<'current' | 'historical'>('current');
 
   useEffect(() => {
+    if (!marketReady) return;
     (async () => {
       try {
-        const list = await clientsApi.list({ limit: 200 });
+        const list = await clientsApi.list({ limit: 200, market });
         setClients(list);
+        // Always select the new book's first client rather than preserving the
+        // previous id — that id belongs to the other book and would render one
+        // book's performance under the other's currency.
         if (list.length) setClientId(list[0].id);
-        else setLoading(false);
+        else {
+          setClientId(null);
+          setResult(null);
+          setLoading(false);
+        }
       } catch {
         toast({ tone: 'error', title: 'Could not load clients' });
         setClients([]);
@@ -68,7 +78,7 @@ export default function PerformancePage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
   const load = useCallback(
     async (id: string) => {
@@ -282,6 +292,7 @@ function MethodBanner({
 }
 
 function ReturnRow({ data }: { data: PerformanceOk }) {
+  const currency = useCurrency();
   // The headline Alpha is the INTERIM one — the spread measured over the same
   // window as the Interim Return tile beside it, so the two tiles are read on
   // the same basis. The annualized spread is still reported, but in the
@@ -335,7 +346,7 @@ function ReturnRow({ data }: { data: PerformanceOk }) {
       <Kpi
         label="Total Gain"
         value={data.totalGain}
-        format={(v) => formatSignedCurrency(v)}
+        format={(v) => formatSignedCurrency(v, currency)}
         sublabel={
           data.absoluteReturn !== null
             ? `${signedPct(data.absoluteReturn)} absolute`
@@ -357,6 +368,7 @@ function ReturnRow({ data }: { data: PerformanceOk }) {
  * precisely the part most systems get wrong.
  */
 function BenchmarkCard({ data }: { data: PerformanceOk }) {
+  const currency = useCurrency();
   const b = data.benchmark;
 
   if (!b) {
@@ -387,7 +399,7 @@ function BenchmarkCard({ data }: { data: PerformanceOk }) {
     ['Benchmark XIRR (annualized)', signedPct(b.xirr)],
     ['Benchmark interim return', b.interim !== null ? signedPct(b.interim) : '—'],
     ['Units held', b.units !== null ? b.units.toFixed(4) : '—'],
-    ['Benchmark value today', b.value !== null ? formatCurrency(b.value) : '—'],
+    ['Benchmark value today', b.value !== null ? formatCurrency(b.value, currency) : '—'],
   ];
 
   // Interim first: it is what the headline tile reports, so the breakdown reads
@@ -452,6 +464,7 @@ function BookSection({
 }: {
   data: PerformanceOk | (PerformanceResponse['data'] & { status: 'insufficient' });
 }) {
+  const currency = useCurrency();
   const ok = data.status === 'ok' ? data : null;
 
   return (
@@ -460,15 +473,15 @@ function BookSection({
         <Kpi
           label="Portfolio Value"
           value={data.portfolioValue}
-          format={(v) => formatCurrency(v)}
-          sublabel={`${formatCompactCurrency(data.holdingsValue)} holdings + ${formatCompactCurrency(data.cashBalance)} cash`}
+          format={(v) => formatCurrency(v, currency)}
+          sublabel={`${formatCompactCurrency(data.holdingsValue, currency)} holdings + ${formatCompactCurrency(data.cashBalance, currency)} cash`}
           icon={<Wallet className="h-4 w-4" />}
           accent="brand"
         />
         <Kpi
           label="Cash Balance"
           value={data.cashBalance}
-          format={(v) => formatCurrency(v)}
+          format={(v) => formatCurrency(v, currency)}
           sublabel={`${pct(data.cashWeight, 1)} of the book`}
           icon={<Coins className="h-4 w-4" />}
           accent={data.cashWeight > 0.25 ? 'warning' : 'neutral'}
@@ -507,27 +520,27 @@ function BookSection({
             subtitle="Measured from the 30-June-2026 inception basis, the same basis as the XIRR"
           />
           <div className="mt-4 divide-y divide-border">
-            <Row label="Invested capital" value={ok ? formatCurrency(ok.investedCapital) : '—'} />
-            <Row label="Realized proceeds" value={ok ? formatCurrency(ok.realizedProceeds) : '—'} />
-            <Row label="Unrealized value" value={formatCurrency(data.holdingsValue)} />
-            <Row label="Net deposits" value={formatCurrency(data.netDeposits)} />
-            <Row label="Net withdrawals" value={formatCurrency(data.netWithdrawals)} />
+            <Row label="Invested capital" value={ok ? formatCurrency(ok.investedCapital, currency) : '—'} />
+            <Row label="Realized proceeds" value={ok ? formatCurrency(ok.realizedProceeds, currency) : '—'} />
+            <Row label="Unrealized value" value={formatCurrency(data.holdingsValue, currency)} />
+            <Row label="Net deposits" value={formatCurrency(data.netDeposits, currency)} />
+            <Row label="Net withdrawals" value={formatCurrency(data.netWithdrawals, currency)} />
             <Row
               label="Realized gain"
-              value={formatSignedCurrency(data.realizedGain)}
+              value={formatSignedCurrency(data.realizedGain, currency)}
               tone={data.realizedGain >= 0 ? 'pos' : 'neg'}
             />
             <Row
               label="Unrealized gain"
-              value={formatSignedCurrency(data.unrealizedGain)}
+              value={formatSignedCurrency(data.unrealizedGain, currency)}
               tone={data.unrealizedGain >= 0 ? 'pos' : 'neg'}
             />
-            <Row label="Dividend income" value={formatCurrency(data.dividendIncome)} />
-            <Row label="Fees" value={formatCurrency(data.fees)} />
+            <Row label="Dividend income" value={formatCurrency(data.dividendIncome, currency)} />
+            <Row label="Fees" value={formatCurrency(data.fees, currency)} />
             {ok && (
               <Row
                 label="Total gain"
-                value={formatSignedCurrency(ok.totalGain)}
+                value={formatSignedCurrency(ok.totalGain, currency)}
                 tone={ok.totalGain >= 0 ? 'pos' : 'neg'}
                 emphasis
               />
@@ -570,10 +583,10 @@ function BookSection({
             <p className="mt-4 rounded-lg bg-amber-50 p-3 text-[12px] leading-relaxed text-amber-700">
               <AlertTriangle className="mr-1.5 inline h-3.5 w-3.5" />
               These figures do not balance: total gain is{' '}
-              {formatSignedCurrency(ok.reconciliation.totalGainFromFlows)} from the cash-flow
-              series but {formatSignedCurrency(ok.reconciliation.totalGainFromPositions)} from
+              {formatSignedCurrency(ok.reconciliation.totalGainFromFlows, currency)} from the cash-flow
+              series but {formatSignedCurrency(ok.reconciliation.totalGainFromPositions, currency)} from
               the position-level gains, a residual of{' '}
-              {formatSignedCurrency(ok.reconciliation.residual)}. Treat every number on this
+              {formatSignedCurrency(ok.reconciliation.residual, currency)}. Treat every number on this
               card as unreliable until it is resolved.
             </p>
           )}
@@ -661,7 +674,7 @@ function BookSection({
                     <td className="py-2.5 font-semibold text-ink">{h.ticker}</td>
                     <td className="py-2.5 truncate text-ink-secondary">{h.company}</td>
                     <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                      {formatCurrency(h.marketValue)}
+                      {formatCurrency(h.marketValue, currency)}
                     </td>
                     <td className="py-2.5 text-right tabular-nums text-ink-secondary">
                       {pct(h.weight, 1)}
@@ -672,7 +685,7 @@ function BookSection({
                         h.unrealizedPnl >= 0 ? 'text-emerald-600' : 'text-rose-600',
                       )}
                     >
-                      {formatSignedCurrency(h.unrealizedPnl)}
+                      {formatSignedCurrency(h.unrealizedPnl, currency)}
                     </td>
                     <td
                       className={cn(
@@ -695,6 +708,7 @@ function BookSection({
 
 /** The exact series the XIRR was solved on. Shown so the number can be audited. */
 function FlowsCard({ data }: { data: PerformanceOk }) {
+  const currency = useCurrency();
   return (
     <Card>
       <CardHeader
@@ -720,7 +734,7 @@ function FlowsCard({ data }: { data: PerformanceOk }) {
                   {f.amount < 0 ? 'Money in' : 'Money out'}
                 </td>
                 <td className="py-2 text-right tabular-nums text-ink">
-                  {formatCurrency(f.amount)}
+                  {formatCurrency(f.amount, currency)}
                 </td>
               </tr>
             ))}
@@ -874,6 +888,10 @@ function PerformerLine({
   row: { ticker: string; company: string; returnPct: number | null; unrealizedPnl: number };
   positive: boolean;
 }) {
+  // Read from context like the other leaf components on this page, rather than
+  // threading a prop through every caller.
+  const currency = useCurrency();
+
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="min-w-0">
@@ -895,7 +913,7 @@ function PerformerLine({
           {row.returnPct !== null ? signedPct(row.returnPct) : '—'}
         </p>
         <p className="text-[12px] tabular-nums text-ink-tertiary">
-          {formatSignedCurrency(row.unrealizedPnl)}
+          {formatSignedCurrency(row.unrealizedPnl, currency)}
         </p>
       </div>
     </div>

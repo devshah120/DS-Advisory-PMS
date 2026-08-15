@@ -8,6 +8,7 @@ import { transactionsApi } from '@/lib/transactions.api';
 import { formatCurrency, formatCompactCurrency, cn } from '@/lib/utils';
 import { Transaction, Client, TransactionType } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
 import { CashFlowModal } from '@/components/transactions/CashFlowModal';
 import { DividendModal } from '@/components/transactions/DividendModal';
 import { GroupedByDate } from '@/components/transactions/GroupedByDate';
@@ -43,6 +44,8 @@ type View = 'all' | 'trades' | 'income' | 'flows';
 export default function TransactionsPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { market, meta, ready: marketReady } = useMarket();
+  const currency = meta.currency;
   const [txns, setTxns] = useState<TxRow[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +55,9 @@ export default function TransactionsPage() {
   const [dividendModalOpen, setDividendModalOpen] = useState(false);
 
   useEffect(() => {
+    if (!marketReady) return;
     (async () => {
+      setLoading(true);
       try {
         // Both go through the api modules rather than raw axios: /clients returns a
         // paginated envelope, not a bare array, and clientsApi.list() is the one place
@@ -60,15 +65,24 @@ export default function TransactionsPage() {
         // page} — which type-asserts to Client[] happily and then explodes on .filter.
         const [txList, clientList] = await Promise.all([
           transactionsApi.list(),
-          clientsApi.list(),
+          clientsApi.list({ limit: 500, market }),
         ]);
 
         setClients(clientList);
+        // The ledger endpoint has no market filter of its own, so the book is
+        // applied here by keeping only rows whose client is in the selected
+        // book. Done with a Set rather than a .find per row because the ledger
+        // is the largest collection on this screen. A transaction whose client
+        // is missing is dropped rather than shown unattributed — it belongs to
+        // the other book by definition.
+        const inBook = new Set(clientList.map((c) => c.id));
         setTxns(
-          txList.map((tx) => ({
-            ...tx,
-            client: clientList.find((cl) => cl.id === tx.clientId),
-          }))
+          txList
+            .filter((tx) => inBook.has(tx.clientId))
+            .map((tx) => ({
+              ...tx,
+              client: clientList.find((cl) => cl.id === tx.clientId),
+            }))
         );
       } catch {
         toast({ tone: 'error', title: 'Failed to load transactions' });
@@ -77,7 +91,7 @@ export default function TransactionsPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
   const tradeTypes: TransactionType[] = ['buy', 'sell', 'split', 'bonus', 'transfer'];
   const incomeTypes: TransactionType[] = ['dividend', 'fees'];
@@ -182,14 +196,14 @@ export default function TransactionsPage() {
       header: 'Price',
       accessor: (r) => r.price ?? 0,
       align: 'right',
-      render: (r) => (r.price ? formatCurrency(r.price) : '—'),
+      render: (r) => (r.price ? formatCurrency(r.price, currency) : '—'),
     },
     {
       key: 'amount',
       header: 'Amount',
       accessor: (r) => r.amount,
       align: 'right',
-      render: (r) => <span className="font-semibold tabular-nums">{formatCurrency(r.amount)}</span>,
+      render: (r) => <span className="font-semibold tabular-nums">{formatCurrency(r.amount, currency)}</span>,
     },
     {
       key: 'date',
@@ -273,7 +287,7 @@ export default function TransactionsPage() {
           )}
         >
           {isInflowRow(r) ? '+' : '−'}
-          {formatCurrency(Math.abs(r.amount))}
+          {formatCurrency(Math.abs(r.amount), currency)}
         </span>
       ),
     },
@@ -329,16 +343,16 @@ export default function TransactionsPage() {
         {view === 'flows' ? (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Flow Entries" value={String(cashFlowRows.length)} />
-            <SummaryTile icon={<ArrowDownLeft className="h-4 w-4" />} label="Total Inflows" value={formatCompactCurrency(inflows)} tone="success" />
-            <SummaryTile icon={<ArrowUpRight className="h-4 w-4" />} label="Total Outflows" value={formatCompactCurrency(outflows)} tone="danger" />
-            <SummaryTile icon={<ArrowLeftRight className="h-4 w-4" />} label="Net Capital In" value={formatCompactCurrency(inflows - outflows)} />
+            <SummaryTile icon={<ArrowDownLeft className="h-4 w-4" />} label="Total Inflows" value={formatCompactCurrency(inflows, currency)} tone="success" />
+            <SummaryTile icon={<ArrowUpRight className="h-4 w-4" />} label="Total Outflows" value={formatCompactCurrency(outflows, currency)} tone="danger" />
+            <SummaryTile icon={<ArrowLeftRight className="h-4 w-4" />} label="Net Capital In" value={formatCompactCurrency(inflows - outflows, currency)} />
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <SummaryTile icon={<ArrowLeftRight className="h-4 w-4" />} label="Total Transactions" value={String(txns.length)} />
-            <SummaryTile icon={<ArrowUpRight className="h-4 w-4" />} label="Buys" value={formatCompactCurrency(buys)} tone="success" />
-            <SummaryTile icon={<ArrowDownLeft className="h-4 w-4" />} label="Sells" value={formatCompactCurrency(sells)} tone="danger" />
-            <SummaryTile icon={<Coins className="h-4 w-4" />} label="Dividends" value={formatCompactCurrency(dividends)} />
+            <SummaryTile icon={<ArrowUpRight className="h-4 w-4" />} label="Buys" value={formatCompactCurrency(buys, currency)} tone="success" />
+            <SummaryTile icon={<ArrowDownLeft className="h-4 w-4" />} label="Sells" value={formatCompactCurrency(sells, currency)} tone="danger" />
+            <SummaryTile icon={<Coins className="h-4 w-4" />} label="Dividends" value={formatCompactCurrency(dividends, currency)} />
           </div>
         )}
 

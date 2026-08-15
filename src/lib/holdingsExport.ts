@@ -19,6 +19,12 @@ export interface HoldingsExportRow {
   pl: number;
   plPercent: number;
   allocPercent: number;
+  /**
+   * How many of a household's accounts hold the name. Set only by the family
+   * export, which adds an "Accounts" column for it; undefined on an individual
+   * client's sheet, where every row would trivially read 1.
+   */
+  accounts?: number;
 }
 
 const FONT_NAME = 'Perpetua';
@@ -122,7 +128,7 @@ interface ColumnSpec {
   value: (row: HoldingsExportRow) => string | number;
 }
 
-const COLUMNS: ColumnSpec[] = [
+const BASE_COLUMNS: ColumnSpec[] = [
   { header: 'Sr No', width: 7, align: 'center', value: (r) => r.srNo },
   { header: 'Symbol', width: 11, align: 'left', value: (r) => r.symbol },
   { header: 'Name', width: 34, align: 'left', value: (r) => r.name },
@@ -168,8 +174,33 @@ const COLUMNS: ColumnSpec[] = [
   },
 ];
 
-const ALLOC_COLUMN = COLUMNS.length; // 1-based index of %alloc
-const PL_PERCENT_COLUMN = COLUMNS.length - 1;
+/**
+ * The "Accounts" column, inserted only into a family sheet. It sits right after
+ * Name so the household's spread across mandates reads next to the name it
+ * belongs to, before the figures start.
+ */
+const ACCOUNTS_COLUMN: ColumnSpec = {
+  header: 'Accounts',
+  width: 10,
+  align: 'center',
+  value: (r) => r.accounts ?? 1,
+};
+
+const NAME_COLUMN_INDEX = 3; // 1-based position of 'Name'
+
+/**
+ * The sheet's columns for a given variant. The individual-client layout is the
+ * firm's reference sheet and stays exactly as it was; the family layout is that
+ * same sheet with one column added, so both read as the same document.
+ */
+function columnsFor(variant: 'client' | 'family'): ColumnSpec[] {
+  if (variant === 'client') return BASE_COLUMNS;
+  return [
+    ...BASE_COLUMNS.slice(0, NAME_COLUMN_INDEX),
+    ACCOUNTS_COLUMN,
+    ...BASE_COLUMNS.slice(NAME_COLUMN_INDEX),
+  ];
+}
 
 /**
  * A client's positions laid out as the firm's reference sheet: Perpetua
@@ -185,31 +216,38 @@ const PL_PERCENT_COLUMN = COLUMNS.length - 1;
 export function buildClientHoldingsWorkbook(
   clientName: string,
   rows: HoldingsExportRow[],
-  cashBalance = 0
+  cashBalance = 0,
+  variant: 'client' | 'family' = 'client'
 ): ExcelJS.Workbook {
+  const columns = columnsFor(variant);
+  const allocColumn = columns.length; // 1-based index of %alloc
+  const plPercentColumn = columns.length - 1;
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Giriraj Global Capital';
   wb.created = new Date();
 
-  const sheet = wb.addWorksheet('Holdings', { views: [{ showGridLines: false }] });
-  sheet.columns = COLUMNS.map((c) => ({ width: c.width }));
+  const sheet = wb.addWorksheet(variant === 'family' ? 'Family Holdings' : 'Holdings', {
+    views: [{ showGridLines: false }],
+  });
+  sheet.columns = columns.map((c) => ({ width: c.width }));
 
-  const headerRow = sheet.addRow(COLUMNS.map((c) => c.header));
+  const headerRow = sheet.addRow(columns.map((c) => c.header));
   headerRow.height = 20;
   headerRow.eachCell((cell, col) => {
     cell.font = { name: FONT_NAME, size: HEADING_SIZE, bold: true };
     cell.fill = HEADER_FILL;
     cell.border = THIN_BORDER;
     cell.alignment = {
-      horizontal: COLUMNS[col - 1].align === 'left' ? 'left' : 'center',
+      horizontal: columns[col - 1].align === 'left' ? 'left' : 'center',
       vertical: 'middle',
     };
   });
 
   for (const row of rows) {
-    const added = sheet.addRow(COLUMNS.map((c) => c.value(row)));
+    const added = sheet.addRow(columns.map((c) => c.value(row)));
     added.eachCell((cell, col) => {
-      const spec = COLUMNS[col - 1];
+      const spec = columns[col - 1];
       cell.font = { name: FONT_NAME, size: BODY_SIZE };
       cell.border = THIN_BORDER;
       cell.alignment = { horizontal: spec.align, vertical: 'middle' };
@@ -217,13 +255,13 @@ export function buildClientHoldingsWorkbook(
     });
 
     // %PL reads green on a gain and red on a loss, as in the reference sheet.
-    const plCell = added.getCell(PL_PERCENT_COLUMN);
+    const plCell = added.getCell(plPercentColumn);
     plCell.fill = row.plPercent >= 0 ? GAIN_FILL : LOSS_FILL;
   }
 
-  applyAllocationGradient(sheet, rows.length);
-  if (cashBalance > 0) addCashRow(sheet, rows, cashBalance);
-  addTotalRow(sheet, rows, cashBalance);
+  applyAllocationGradient(sheet, rows.length, allocColumn);
+  if (cashBalance > 0) addCashRow(sheet, rows, cashBalance, columns, allocColumn);
+  addTotalRow(sheet, rows, cashBalance, columns);
   addSectorAllocationBlock(wb, sheet, buildSectorSlices(rows, cashBalance));
 
   return wb;
@@ -238,27 +276,26 @@ export function buildClientHoldingsWorkbook(
 function addCashRow(
   sheet: ExcelJS.Worksheet,
   rows: HoldingsExportRow[],
-  cashBalance: number
+  cashBalance: number,
+  columns: ColumnSpec[],
+  allocColumn: number
 ): void {
   const portfolioValue = rows.reduce((s, r) => s + r.currentValue, 0) + cashBalance;
 
-  const cells: (string | number | null)[] = [
-    rows.length + 1,
-    'CASH',
-    'Cash & Equivalents',
-    null,
-    null,
-    null,
-    null,
-    cashBalance,
-    null,
-    null,
-    portfolioValue ? cashBalance / portfolioValue : 0,
-  ];
+  // Built by header rather than by position so the extra 'Accounts' column in
+  // the family layout cannot shift the cash figures into the wrong cells.
+  const byHeader: Record<string, string | number | null> = {
+    'Sr No': rows.length + 1,
+    Symbol: 'CASH',
+    Name: 'Cash & Equivalents',
+    'Current Value': cashBalance,
+    '%alloc': portfolioValue ? cashBalance / portfolioValue : 0,
+  };
+  const cells = columns.map((c) => byHeader[c.header] ?? null);
 
   const row = sheet.addRow(cells);
   row.eachCell({ includeEmpty: true }, (cell, col) => {
-    const spec = COLUMNS[col - 1];
+    const spec = columns[col - 1];
     cell.font = { name: FONT_NAME, size: BODY_SIZE, italic: true };
     cell.border = THIN_BORDER;
     cell.alignment = { horizontal: spec.align, vertical: 'middle' };
@@ -267,7 +304,7 @@ function addCashRow(
 
   // A neutral fill keeps the cash weight legible without implying it belongs on
   // the green scale used to rank the invested positions.
-  row.getCell(ALLOC_COLUMN).fill = {
+  row.getCell(allocColumn).fill = {
     type: 'pattern',
     pattern: 'solid',
     fgColor: { argb: 'FFF0F0F0' },
@@ -280,12 +317,16 @@ function addCashRow(
  * survives in viewers that don't evaluate colour scales (Google Sheets
  * imports, Numbers, most PDF converters).
  */
-function applyAllocationGradient(sheet: ExcelJS.Worksheet, rowCount: number): void {
+function applyAllocationGradient(
+  sheet: ExcelJS.Worksheet,
+  rowCount: number,
+  allocColumn: number
+): void {
   if (rowCount === 0) return;
 
   const values: number[] = [];
   for (let i = 0; i < rowCount; i++) {
-    const cell = sheet.getRow(i + 2).getCell(ALLOC_COLUMN);
+    const cell = sheet.getRow(i + 2).getCell(allocColumn);
     values.push(typeof cell.value === 'number' ? cell.value : 0);
   }
 
@@ -297,7 +338,7 @@ function applyAllocationGradient(sheet: ExcelJS.Worksheet, rowCount: number): vo
     // A single position (or an all-equal book) has no spread to shade across,
     // so it takes the full-strength green rather than dividing by zero.
     const t = span > 0 ? (value - min) / span : 1;
-    sheet.getRow(i + 2).getCell(ALLOC_COLUMN).fill = {
+    sheet.getRow(i + 2).getCell(allocColumn).fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: greenAt(t) },
@@ -327,7 +368,8 @@ function greenAt(t: number): string {
 function addTotalRow(
   sheet: ExcelJS.Worksheet,
   rows: HoldingsExportRow[],
-  cashBalance = 0
+  cashBalance = 0,
+  columns: ColumnSpec[] = BASE_COLUMNS
 ): void {
   const totals = rows.reduce(
     (acc, r) => ({
@@ -338,25 +380,23 @@ function addTotalRow(
     { costBasisTotal: 0, currentValue: 0, pl: 0 }
   );
 
-  const cells: (string | number | null)[] = [
-    null,
-    null,
-    'TOTAL',
-    null,
-    null,
-    totals.costBasisTotal,
-    null,
-    totals.currentValue + cashBalance,
-    totals.pl,
+  // Keyed by header for the same reason as the cash row — the family layout's
+  // extra column must not push TOTAL's figures one cell to the right.
+  const byHeader: Record<string, string | number | null> = {
+    Name: 'TOTAL',
+    'Cost Basis Total': totals.costBasisTotal,
+    'Current Value': totals.currentValue + cashBalance,
+    PL: totals.pl,
     // Book-level return, computed off the totals rather than averaging the
     // per-row percentages, which would weight a tiny position like a large one.
-    totals.costBasisTotal ? totals.pl / totals.costBasisTotal : 0,
-    rows.length ? 1 : 0,
-  ];
+    '%PL': totals.costBasisTotal ? totals.pl / totals.costBasisTotal : 0,
+    '%alloc': rows.length ? 1 : 0,
+  };
+  const cells = columns.map((c) => byHeader[c.header] ?? null);
 
   const row = sheet.addRow(cells);
   row.eachCell({ includeEmpty: true }, (cell, col) => {
-    const spec = COLUMNS[col - 1];
+    const spec = columns[col - 1];
     cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
     cell.alignment = { horizontal: spec.align, vertical: 'middle' };
     cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
@@ -535,13 +575,40 @@ export async function downloadClientHoldingsWorkbook(
   cashBalance = 0
 ): Promise<void> {
   const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance);
+  await saveWorkbook(wb, `${slugify(clientName)}-holdings.xlsx`);
+}
+
+/**
+ * The merged household portfolio in the firm's reference format — the same
+ * sheet an individual client gets (borders, Perpetua, whole numbers, the %PL
+ * gain/loss tints, the allocation gradient and the sector allocation block with
+ * its pie), plus an "Accounts" column showing how many of the household's
+ * mandates hold each name.
+ *
+ * `cashBalance` is the household's combined cash across every member account,
+ * so the sheet foots to the same portfolio value the family drawer reports.
+ */
+export async function downloadFamilyHoldingsWorkbook(
+  familyName: string,
+  rows: HoldingsExportRow[],
+  cashBalance = 0
+): Promise<void> {
+  const wb = buildClientHoldingsWorkbook(familyName, rows, cashBalance, 'family');
+  await saveWorkbook(wb, `${slugify(familyName)}-family-holdings.xlsx`);
+}
+
+function slugify(name: string): string {
+  return name.replace(/\s+/g, '_').toLowerCase();
+}
+
+async function saveWorkbook(wb: ExcelJS.Workbook, filename: string): Promise<void> {
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `${clientName.replace(/\s+/g, '_').toLowerCase()}-holdings.xlsx`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
 }

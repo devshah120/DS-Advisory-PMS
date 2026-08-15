@@ -5,8 +5,10 @@ import { ArrowDown, ArrowUp, Download, Hash, Loader2, Pencil, Plus, Trash2, Uplo
 import { watchlistApi } from '@/lib/watchlist.api';
 import { marketApi, SymbolNotFoundError } from '@/lib/market.api';
 import { formatCurrency, formatSignedPct, cn } from '@/lib/utils';
+import { displayTicker } from '@/lib/market-scope';
 import { Watchlist, WatchlistReturns, BenchmarkReturns, WatchlistFolder, WatchlistSlot } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
 import { Card, Input, Button, Tabs, Modal, Textarea, useToast } from '@/components/ui';
 
 type LookupStatus = 'idle' | 'loading' | 'found' | 'notfound' | 'error';
@@ -21,6 +23,14 @@ export default function WatchlistPage() {
   usePageHeading({ title: "Watchlist", subtitle: "Tickers under watch, with MTD / QTD / YTD performance vs. benchmarks" });
 
   const { toast } = useToast();
+  /**
+   * The selected book. It does three things here: qualifies a bare ticker
+   * against the right exchange on add ("RELIANCE" → "RELIANCE.NS"), scopes the
+   * list so the Indian watchlist shows Indian names only, and supplies the
+   * currency the Price column is rendered in.
+   */
+  const { market, meta, ready: marketReady } = useMarket();
+  const currency = meta.currency;
   const [slot, setSlot] = useState<WatchlistSlot>('1');
   const [folders, setFolders] = useState<WatchlistFolder[]>(SLOTS.map((s) => ({ slot: s, name: `Watchlist ${s}` })));
   const [renaming, setRenaming] = useState<WatchlistSlot | null>(null);
@@ -56,7 +66,7 @@ export default function WatchlistPage() {
     async (targetSlot: WatchlistSlot) => {
       setLoading(true);
       try {
-        const data = await watchlistApi.list(targetSlot);
+        const data = await watchlistApi.list(targetSlot, market);
         const rows: Row[] = data.map((d) => ({ ...d, returnsLoading: true }));
         setItems(rows);
         rows.forEach((r) => loadReturns(r));
@@ -66,25 +76,35 @@ export default function WatchlistPage() {
         setLoading(false);
       }
     },
-    [loadReturns, toast]
+    [loadReturns, toast, market]
   );
 
+  // Folder names are per book, so they reload with the selector alongside the
+  // list — the Indian book's slot names are its own.
   useEffect(() => {
+    if (!marketReady) return;
     watchlistApi
-      .folders()
+      .folders(market)
       .then(setFolders)
       .catch(() => {});
-  }, []);
+  }, [market, marketReady]);
 
+  // Gated on `marketReady` so the page issues one request for the correct book
+  // rather than fetching the US list first and then replacing it.
   useEffect(() => {
+    if (!marketReady) return;
     loadList(slot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot]);
+  }, [slot, market, marketReady]);
 
+  // Benchmarks follow the book too — an Indian watchlist is measured against
+  // the Nifty and Sensex, not the S&P.
   useEffect(() => {
+    if (!marketReady) return;
     (async () => {
+      setBenchmarksLoading(true);
       try {
-        const data = await watchlistApi.benchmarks();
+        const data = await watchlistApi.benchmarks(market);
         setBenchmarks(data);
       } catch {
         toast({ tone: 'error', title: 'Failed to load benchmark returns' });
@@ -93,7 +113,7 @@ export default function WatchlistPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
   const runLookup = useCallback(async (t: string) => {
     inflight.current?.abort();
@@ -101,7 +121,7 @@ export default function WatchlistPage() {
     inflight.current = controller;
     setStatus('loading');
     try {
-      const data = await marketApi.lookup(t, controller.signal);
+      const data = await marketApi.lookup(t, market, controller.signal);
       if (controller.signal.aborted) return;
       setPreview({ company: data.company, sector: data.sector });
       setStatus('found');
@@ -110,7 +130,7 @@ export default function WatchlistPage() {
       setPreview(null);
       setStatus(err instanceof SymbolNotFoundError ? 'notfound' : 'error');
     }
-  }, []);
+  }, [market]);
 
   useEffect(() => {
     const t = ticker.trim().toUpperCase();
@@ -131,7 +151,8 @@ export default function WatchlistPage() {
     if (!t || status === 'notfound') return;
     setAdding(true);
     try {
-      const created = await watchlistApi.add(t, slot);
+      // `market` is what turns a bare Indian ticker into a resolvable symbol.
+      const created = await watchlistApi.add(t, slot, market);
       const row: Row = { ...created, returnsLoading: true };
       setItems((prev) => [...prev, row]);
       loadReturns(row);
@@ -168,7 +189,7 @@ export default function WatchlistPage() {
 
     setBulkLoading(true);
     try {
-      const result = await watchlistApi.bulkAdd(tickers, slot);
+      const result = await watchlistApi.bulkAdd(tickers, slot, market);
       if (result.added.length > 0) {
         toast({ tone: 'success', title: `Added ${result.added.length} ticker${result.added.length === 1 ? '' : 's'}` });
       }
@@ -200,7 +221,7 @@ export default function WatchlistPage() {
       return;
     }
     try {
-      const updated = await watchlistApi.renameFolder(renaming, renameValue.trim());
+      const updated = await watchlistApi.renameFolder(renaming, renameValue.trim(), market);
       setFolders((prev) => prev.map((f) => (f.slot === updated.slot ? updated : f)));
     } catch {
       toast({ tone: 'error', title: 'Could not rename watchlist' });
@@ -220,7 +241,10 @@ export default function WatchlistPage() {
             ? 'Unknown ticker'
             : undefined;
 
-  const primaryBenchmark = useMemo(() => benchmarks.find((b) => b.code === 'SP500') ?? benchmarks[0], [benchmarks]);
+  // The book's headline index — the server returns them in that order, so the
+  // first is the Nifty for India and the S&P for the US. Never hardcoded to
+  // SP500, which simply wouldn't be present in the Indian book's response.
+  const primaryBenchmark = useMemo(() => benchmarks[0], [benchmarks]);
   const activeFolder = folders.find((f) => f.slot === slot);
 
   // Only the ticker rows sort — the S&P/Russell/Dow footer always stays in
@@ -248,7 +272,7 @@ export default function WatchlistPage() {
   const handleExport = () => {
     const header = ['Symbol', 'Company', 'Sector', 'Industry', 'Price', 'MTD %', 'QTD %', 'YTD %'];
     const rows = sortedItems.map((item) => [
-      item.ticker,
+      displayTicker(item.ticker),
       item.company,
       item.sector,
       item.industry,
@@ -298,7 +322,8 @@ export default function WatchlistPage() {
             <div className="flex-1">
               <Input
                 label="Add ticker"
-                placeholder="AAPL"
+                // Typed bare in either book; the exchange suffix is added server-side.
+                placeholder={market === 'INDIA' ? 'RELIANCE' : 'AAPL'}
                 leftIcon={<Hash className="h-4 w-4" />}
                 rightAddon={status === 'loading' ? <Loader2 className="h-4 w-4 animate-spin text-ink-tertiary" /> : undefined}
                 value={ticker}
@@ -354,13 +379,13 @@ export default function WatchlistPage() {
                   sortedItems.map((item) => (
                     <tr key={item.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-ink">{item.ticker}</p>
+                        <p className="font-semibold text-ink">{displayTicker(item.ticker)}</p>
                         <p className="max-w-[200px] truncate text-xs text-ink-tertiary">{item.company}</p>
                       </td>
                       <td className="px-4 py-3 text-ink-secondary">{item.sector || '—'}</td>
                       <td className="px-4 py-3 text-ink-secondary">{item.industry || '—'}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-ink">
-                        {item.returnsLoading ? '…' : item.returns?.currentPrice != null ? formatCurrency(item.returns.currentPrice) : '—'}
+                        {item.returnsLoading ? '…' : item.returns?.currentPrice != null ? formatCurrency(item.returns.currentPrice, currency) : '—'}
                       </td>
                       <ReturnCell value={item.returns?.mtd.returnPct} loading={item.returnsLoading} benchmark={primaryBenchmark?.mtd.returnPct} />
                       <ReturnCell value={item.returns?.qtd.returnPct} loading={item.returnsLoading} benchmark={primaryBenchmark?.qtd.returnPct} />
@@ -502,8 +527,19 @@ function ReturnCell({
   if (loading) {
     return <td className="px-4 py-3 text-right text-ink-tertiary">…</td>;
   }
+  // A null return is data we don't have, not a zero. Yahoo serves no daily
+  // history for some thinly-traded NSE SME scrips (the '-SM' series) — only a
+  // live quote — so there is no base close to measure the period against. The
+  // dash is honest; the tooltip is what stops it reading as a broken cell.
   if (value == null) {
-    return <td className="px-4 py-3 text-right text-ink-tertiary">—</td>;
+    return (
+      <td
+        className="px-4 py-3 text-right text-ink-tertiary"
+        title="No price history available for this period"
+      >
+        —
+      </td>
+    );
   }
   // Underperformance vs. the primary benchmark (S&P 500) is flagged in red;
   // everything else (including benchmark rows themselves) uses plain up/down coloring.

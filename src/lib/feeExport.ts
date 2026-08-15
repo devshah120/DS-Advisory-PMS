@@ -18,11 +18,34 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 };
 
 /**
+ * Excel number formats and locales, per reporting currency.
+ *
+ * The rupee format uses Excel's Indian digit grouping (`#,##,##0.00`), not the
+ * western one — an Indian client's statement reads ₹1,25,00,000, and a western
+ * grouping in a fee document sent to them is simply wrong. `₹` is written
+ * as an escape so the format string survives any file-encoding round trip.
+ */
+const CURRENCY_FORMATS: Record<string, { numFmt: string; locale: string }> = {
+  USD: { numFmt: '"$"#,##0.00', locale: 'en-US' },
+  INR: { numFmt: '"₹"#,##,##0.00', locale: 'en-IN' },
+  EUR: { numFmt: '"€"#,##0.00', locale: 'de-DE' },
+  GBP: { numFmt: '"£"#,##0.00', locale: 'en-GB' },
+};
+
+function currencyFormat(currency: string | undefined) {
+  return CURRENCY_FORMATS[currency ?? 'USD'] ?? CURRENCY_FORMATS.USD;
+}
+
+/**
  * One client's fee working, laid out as a bordered label/value box — the same
  * shape as the firm's reference workbook — so a client can see exactly what
  * rate and how many days their fee was prorated over, not just the total.
  */
 export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS.Workbook> {
+  // The unit this mandate is billed in — an Indian client's statement is in
+  // rupees, with Indian digit grouping, not dollars.
+  const money = currencyFormat(fee.currency);
+
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Giriraj Global Capital';
   wb.created = new Date();
@@ -53,7 +76,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
 
   const rows: Array<[string, string | number, string?]> = [
     ['Annual fee rate', fee.feeRatePercent / 100, '0.00%'],
-    [valueLabel, fee.portfolioValue, '"$"#,##0.00'],
+    [valueLabel, fee.portfolioValue, money.numFmt],
     ['Days billed this quarter', `${fee.daysBilled} / ${fee.daysInQuarter}`],
     ['Quarterly rate (annual ÷ 4)', fee.feeRatePercent / 100 / 4, '0.0000%'],
     ['Proration (days billed ÷ days in quarter)', fee.daysBilled / fee.daysInQuarter, '0.00%'],
@@ -73,7 +96,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   totalRow.getCell(1).fill = LABEL_FILL;
   totalRow.getCell(1).font = { bold: true, size: 11 };
   totalRow.getCell(2).font = { bold: true, size: 11 };
-  totalRow.getCell(2).numFmt = '"$"#,##0.00';
+  totalRow.getCell(2).numFmt = money.numFmt;
   totalRow.getCell(2).alignment = { horizontal: 'right' };
   totalRow.getCell(1).border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF111827' } } };
   totalRow.getCell(2).border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF111827' } } };
@@ -104,14 +127,19 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   sheet.mergeCells(formula.number, 1, formula.number, 2);
 
   const substituted = sheet.addRow([
-    `= ${fee.portfolioValue.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} × ` +
-      `(${fee.feeRatePercent}% ÷ 4) × (${fee.daysBilled} ÷ ${fee.daysInQuarter})`,
+    `= ${fee.portfolioValue.toLocaleString(money.locale, {
+      style: 'currency',
+      currency: fee.currency ?? 'USD',
+    })} × ` + `(${fee.feeRatePercent}% ÷ 4) × (${fee.daysBilled} ÷ ${fee.daysInQuarter})`,
   ]);
   substituted.font = { size: 10 };
   sheet.mergeCells(substituted.number, 1, substituted.number, 2);
 
   const result = sheet.addRow([
-    `= ${fee.feeAmount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}`,
+    `= ${fee.feeAmount.toLocaleString(money.locale, {
+      style: 'currency',
+      currency: fee.currency ?? 'USD',
+    })}`,
   ]);
   result.font = { bold: true, size: 10 };
   sheet.mergeCells(result.number, 1, result.number, 2);

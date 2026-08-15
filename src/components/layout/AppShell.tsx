@@ -8,6 +8,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { CommandPalette } from './CommandPalette';
 import { PageHeaderProvider, usePageHeader } from './PageHeaderContext';
+import { MarketProvider } from './MarketContext';
 
 /**
  * The persistent application chrome: sidebar, header, command palette.
@@ -24,10 +25,15 @@ export default function AppShell({
   children: ReactNode;
   requireAuth?: boolean;
 }) {
+  // MarketProvider sits outside PageHeaderProvider so the selected book is in
+  // scope for the Header (which renders the selector) and for every page at
+  // once — the selection has to outlive navigation between them.
   return (
-    <PageHeaderProvider>
-      <AppShellInner requireAuth={requireAuth}>{children}</AppShellInner>
-    </PageHeaderProvider>
+    <MarketProvider>
+      <PageHeaderProvider>
+        <AppShellInner requireAuth={requireAuth}>{children}</AppShellInner>
+      </PageHeaderProvider>
+    </MarketProvider>
   );
 }
 

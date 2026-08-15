@@ -12,6 +12,7 @@ import {
 } from '@/lib/utils';
 import { Client, RiskProfile, ClientStatus } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
 import {
   Card,
   Badge,
@@ -37,6 +38,8 @@ const statusMeta: Record<ClientStatus, { tone: any; label: string }> = {
 export default function ClientsPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { market, meta, ready: marketReady } = useMarket();
+  const currency = meta.currency;
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,9 +56,13 @@ export default function ClientsPage() {
   );
 
   useEffect(() => {
+    if (!marketReady) return;
     (async () => {
+      setLoading(true);
       try {
-        setClients(await clientsApi.list({ limit: 100 }));
+        // Only the selected book's mandates — the AUM and cash tiles below sum
+        // these rows, and summing two currencies would be meaningless.
+        setClients(await clientsApi.list({ limit: 100, market }));
       } catch {
         toast({ tone: 'error', title: 'Failed to load clients' });
       } finally {
@@ -63,7 +70,7 @@ export default function ClientsPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
   const totalAum = clients.reduce((s, c) => s + c.portfolioValue, 0);
   const totalCash = clients.reduce((s, c) => s + c.cashBalance, 0);
@@ -123,14 +130,14 @@ export default function ClientsPage() {
       header: 'Portfolio Value',
       accessor: (r) => r.portfolioValue,
       align: 'right',
-      render: (r) => <span className="font-semibold">{formatCurrency(r.portfolioValue)}</span>,
+      render: (r) => <span className="font-semibold">{formatCurrency(r.portfolioValue, currency)}</span>,
     },
     {
       key: 'cashBalance',
       header: 'Cash',
       accessor: (r) => r.cashBalance,
       align: 'right',
-      render: (r) => formatCurrency(r.cashBalance),
+      render: (r) => formatCurrency(r.cashBalance, currency),
     },
     {
       key: 'cashWeight',
@@ -212,8 +219,8 @@ export default function ClientsPage() {
         {/* Summary */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <SummaryTile icon={<Users className="h-4 w-4" />} label="Total Clients" value={String(clients.length)} />
-          <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Total AUM" value={formatCompactCurrency(totalAum)} />
-          <SummaryTile icon={<PiggyBank className="h-4 w-4" />} label="Total Cash" value={formatCompactCurrency(totalCash)} />
+          <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Total AUM" value={formatCompactCurrency(totalAum, currency)} />
+          <SummaryTile icon={<PiggyBank className="h-4 w-4" />} label="Total Cash" value={formatCompactCurrency(totalCash, currency)} />
           <SummaryTile
             icon={<TrendingUp className="h-4 w-4" />}
             label="Average XIRR"

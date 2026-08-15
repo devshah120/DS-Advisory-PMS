@@ -17,6 +17,7 @@ import { reportsApi } from '@/lib/reports.api';
 import { downloadClientFeeWorkbook } from '@/lib/feeExport';
 import { ClientFeeRow, FeeQuarterOption } from '@/types/reports';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, Badge, Button, Select, useToast } from '@/components/ui';
 
 interface ReportTemplate {
@@ -111,6 +112,10 @@ const formatTone: Record<GeneratedReport['format'], any> = {
 
 export default function ReportsPage() {
   const { toast } = useToast();
+  // The fee table is scoped to the selected book; `currency` is its fallback
+  // unit for the total, while each row renders in the client's own currency.
+  const { market, meta, ready: marketReady } = useMarket();
+  const currency = meta.currency;
   const [generating, setGenerating] = useState<string | null>(null);
 
   const [fees, setFees] = useState<ClientFeeRow[]>([]);
@@ -144,10 +149,13 @@ export default function ReportsPage() {
   // client-side below — every client's row for a quarter arrives in one call,
   // so filtering locally avoids a round trip per selection.
   useEffect(() => {
+    if (!marketReady) return;
     let mounted = true;
     setFeesLoading(true);
     reportsApi
-      .fees(quarter || undefined)
+      // Scoped to the selected book: the table totals its rows, and an
+      // unscoped read would sum USD and INR fees into one meaningless figure.
+      .fees(quarter || undefined, market)
       .then((rows) => mounted && setFees(rows))
       .catch(() => {
         if (!mounted) return;
@@ -159,7 +167,7 @@ export default function ReportsPage() {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quarter]);
+  }, [quarter, market, marketReady]);
 
   // Clients present in this quarter — derived from the rows themselves rather
   // than the full client list, so the dropdown can't offer a client who wasn't
@@ -372,13 +380,13 @@ export default function ReportsPage() {
                       {formatPct(f.feeRatePercent)}
                     </td>
                     <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                      {formatCurrency(f.portfolioValue)}
+                      {formatCurrency(f.portfolioValue, f.currency ?? currency)}
                     </td>
                     <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
                       {f.daysBilled} / {f.daysInQuarter}
                     </td>
                     <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                      {formatCurrency(f.feeAmount)}
+                      {formatCurrency(f.feeAmount, f.currency ?? currency)}
                     </td>
                     <td className="px-5 py-3">
                       <Badge tone={f.isEstimate ? 'warning' : 'success'} dot>
@@ -407,7 +415,8 @@ export default function ReportsPage() {
                     Total
                   </td>
                   <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                    {formatCurrency(totalFeeAmount)}
+                    {/* Every row is from one book, so the book's currency is the total's. */}
+                    {formatCurrency(totalFeeAmount, currency)}
                   </td>
                   <td colSpan={2} />
                 </tr>

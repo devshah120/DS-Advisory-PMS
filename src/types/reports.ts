@@ -19,6 +19,8 @@ export interface ClientFeeRow {
   feeAmount: number;
   /** 'snapshot' | 'reconstruction' | 'live' | 'unavailable'. */
   valuationSource: string;
+  /** The client's own reporting currency — the unit this fee was billed in. */
+  currency: string;
 }
 
 /** One entry in the quarter dropdown. */

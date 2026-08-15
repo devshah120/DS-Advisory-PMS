@@ -37,7 +37,8 @@ export function TopHoldingsList({ holdings }: { holdings: TopHolding[] }) {
               {i + 1}
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-ink">{h.ticker}</p>
+              {/* Suffix-stripped: an Indian book reads "RELIANCE", not "RELIANCE.NS". */}
+              <p className="text-sm font-semibold text-ink">{h.displayTicker ?? h.ticker}</p>
               <p className="truncate text-xs text-ink-tertiary">
                 {h.company}
                 {h.numClients > 1 ? ` · ${h.numClients} clients` : ''}

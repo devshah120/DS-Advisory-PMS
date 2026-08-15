@@ -1,3 +1,7 @@
+import type { Market } from '@/lib/market-scope';
+
+export type { Market };
+
 // Auth Types
 export type UserRole = 'admin' | 'portfolio_manager' | 'research_analyst' | 'viewer';
 
@@ -42,6 +46,8 @@ export interface Client {
   benchmark: string;
   riskProfile: RiskProfile;
   accountingMethod: AccountingMethod;
+  /** Which book this mandate belongs to. Existing clients read back as 'US'. */
+  market: Market;
   currency: string;
   status: ClientStatus;
   cashBalance: number;
@@ -51,9 +57,99 @@ export interface Client {
   feeRatePercent: number;
   /** The mandate's actual start date — used to prorate the first billing quarter. */
   inceptionDate: Date;
+  /** The household this mandate belongs to, if any. Null for a standalone account. */
+  familyId?: string | null;
+  /** Joined by the API so the list can label a mandate without a second fetch. */
+  family?: { id: string; name: string } | null;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// Family (household) Types
+
+/**
+ * Several client mandates managed as one book — a couple, their children, an
+ * HUF. Individual mandates stay first-class; this groups them for reporting.
+ */
+export interface Family {
+  id: string;
+  name: string;
+  /** A family lives in ONE book: its members' figures share a single currency. */
+  market: Market;
+  /** ISO 4217 for `market`, so the aggregate renders without re-deriving it. */
+  currency: string;
+  notes?: string | null;
+  memberCount: number;
+  members: Array<{ id: string; name: string }>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** One symbol after merging every account in the household. */
+export interface FamilyPosition {
+  ticker: string;
+  displayTicker: string;
+  company: string;
+  sector: string;
+  industry: string;
+  quantity: number;
+  /** Cost-weighted across accounts — Σ(qty × avgCost) ÷ Σ(qty). */
+  averageCost: number;
+  costBasis: number;
+  currentPrice: number;
+  marketValue: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  weight: number;
+  realizedPnL: number;
+  /** How many of the family's accounts hold it. */
+  accounts: number;
+  holders: Array<{
+    clientId: string;
+    clientName: string;
+    quantity: number;
+    averageCost: number;
+    marketValue: number;
+    unrealizedPnL: number;
+  }>;
+}
+
+export interface FamilySectorAllocation {
+  sector: string;
+  marketValue: number;
+  weight: number;
+  positions: number;
+  unrealizedPnL: number;
+}
+
+export interface FamilyAggregate {
+  id: string;
+  name: string;
+  market: Market;
+  currency: string;
+  members: Array<{
+    id: string;
+    name: string;
+    marketValue: number;
+    cashBalance: number;
+    portfolioValue: number;
+  }>;
+  positions: FamilyPosition[];
+  sectorAllocation: FamilySectorAllocation[];
+  totals: {
+    /** Distinct symbols after merging. */
+    positionCount: number;
+    /** Account-level lots that fed the roll-up, before merging. */
+    lotCount: number;
+    costBasis: number;
+    marketValue: number;
+    unrealizedPnL: number;
+    unrealizedPnLPercent: number;
+    realizedPnL: number;
+    cashBalance: number;
+    portfolioValue: number;
+  };
 }
 
 // Holdings Types
@@ -160,6 +256,8 @@ export interface Watchlist {
   company: string;
   sector: string;
   industry: string;
+  /** Which book the name is tracked on. Entries predating this read back 'US'. */
+  market: Market;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -167,6 +265,8 @@ export interface Watchlist {
 export interface WatchlistFolder {
   slot: WatchlistSlot;
   name: string;
+  /** Slot names are per book, so India's "Slot 1" can differ from the US's. */
+  market?: Market;
 }
 
 export interface BulkAddResult {
@@ -206,6 +306,10 @@ export interface PortfolioEvent {
   label: string;
   date: string;
   status: 'Upcoming' | 'Confirmed';
+  /** The book this ticker trades in — the calendar never mixes the two. */
+  market: Market;
+  /** Tracked but not yet owned: on the watchlist with no client holding it. */
+  watchlistOnly: boolean;
 }
 
 // Fundamentals Engine Types
@@ -299,6 +403,8 @@ export interface FundamentalView {
 // Dashboard Types
 export interface HoldingMover {
   ticker: string;
+  /** Suffix-stripped ticker for display — 'RELIANCE.NS' renders as 'RELIANCE'. */
+  displayTicker: string;
   company: string;
   clientId: string;
   marketValue: number;
@@ -307,6 +413,14 @@ export interface HoldingMover {
 }
 
 export interface DashboardOverview {
+  /**
+   * The book these figures describe, echoed back by the server. Read this rather
+   * than the local selector when labelling the payload — the selector can be a
+   * render ahead of the response it is captioning.
+   */
+  market: Market;
+  /** ISO 4217 for `market` — 'USD' or 'INR'. Drives every currency format here. */
+  currency: string;
   totalAUM: number;
   /** House-wide idle cash across every client — deployable buying power, not deployed capital. */
   totalCash: number;
@@ -331,6 +445,7 @@ export interface ClientMover {
 
 export interface TopHolding {
   ticker: string;
+  displayTicker: string;
   company: string;
   marketValue: number;
   weight: number;
@@ -350,6 +465,11 @@ export interface MarketQuote {
   currentPrice: number | null;
   dayChangePercent: number | null;
   ytdChangePercent: number | null;
+  /**
+   * This quote's own currency. Not the book's: the Indian strip shows Nifty and
+   * Sensex in INR next to WTI and gold, which Yahoo quotes in USD for everyone.
+   */
+  currency: string;
 }
 
 // Pagination Types

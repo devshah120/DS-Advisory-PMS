@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Layers } from 'lucide-react';
 import { formatCurrency, cn } from '@/lib/utils';
+import { useCurrency } from '@/components/layout/MarketContext';
 import { Badge } from '@/components/ui';
 import type { Column } from '@/components/ui';
 
@@ -24,6 +25,10 @@ export function GroupedByDate<T extends { date: string | Date; amount: number; t
   columns: Column<T>[];
   rowKey: (row: T) => string;
 }) {
+  // The day's total is money in the selected book's currency — read from
+  // context so an Indian ledger's rollup reads in rupees, not dollars.
+  const currency = useCurrency();
+
   const groups = useMemo(() => {
     const byDate = new Map<string, T[]>();
     for (const r of rows) {
@@ -87,7 +92,7 @@ export function GroupedByDate<T extends { date: string | Date; amount: number; t
                   : `${g.items.length} entr${g.items.length === 1 ? 'y' : 'ies'}`}
               </Badge>
               <span className="ml-auto text-[13px] font-semibold tabular-nums text-ink">
-                {formatCurrency(g.total)}
+                {formatCurrency(g.total, currency)}
               </span>
             </button>
 

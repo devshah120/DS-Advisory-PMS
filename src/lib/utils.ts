@@ -4,10 +4,29 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
+/**
+ * The Intl locale a currency should be formatted in.
+ *
+ * Currency alone doesn't determine digit grouping, and for INR the grouping is
+ * the whole point: 'en-US' renders ₹12,500,000 while 'en-IN' renders
+ * ₹1,25,00,000 — the lakh/crore convention every Indian statement uses. Keyed by
+ * currency rather than threaded through as a parameter so that the dozens of
+ * existing `formatCurrency(x, client.currency)` call sites become correct
+ * without each one having to learn about locales.
+ */
+const CURRENCY_LOCALES: Record<string, string> = {
+  USD: 'en-US',
+  INR: 'en-IN',
+};
+
+function localeFor(currency: string): string {
+  return CURRENCY_LOCALES[currency] ?? 'en-US';
+}
+
 export function formatCurrency(value: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(localeFor(currency), {
     style: 'currency',
-    currency: currency === 'USD' ? 'USD' : currency,
+    currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
@@ -28,14 +47,43 @@ export function formatSignedPct(value: number, decimals = 2): string {
   return `${sign}${value.toFixed(decimals)}%`;
 }
 
-/** Compact currency for large AUM figures (e.g. 1875000 -> "$1.88M"). */
+/**
+ * Compact currency for large AUM figures — "$1.88M", or "₹4.82 Cr" for INR.
+ *
+ * Rupees are abbreviated by hand rather than through Intl's `notation: 'compact'`
+ * because that emits western magnitudes even under 'en-IN' (₹1.3Cr becomes
+ * "₹13M"), which is not how any Indian client reads a portfolio figure. Lakh
+ * (10⁵) and crore (10⁷) are the units the audience actually uses, so the
+ * thresholds below are the real convention, not a cosmetic relabelling.
+ */
 export function formatCompactCurrency(value: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
+  if (currency === 'INR') return formatCompactInr(value);
+
+  return new Intl.NumberFormat(localeFor(currency), {
     style: 'currency',
     currency,
     notation: 'compact',
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+/** ₹ in lakh/crore. Sign is handled up front so negatives read "-₹4.82 Cr". */
+function formatCompactInr(value: number): string {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+
+  const CRORE = 1e7;
+  const LAKH = 1e5;
+  const THOUSAND = 1e3;
+
+  const render = (n: number, suffix: string) =>
+    // Two decimals, but trailing zeros dropped so it reads "₹5 Cr" not "₹5.00 Cr".
+    `${sign}₹${parseFloat(n.toFixed(2)).toLocaleString('en-IN')}${suffix}`;
+
+  if (abs >= CRORE) return render(abs / CRORE, ' Cr');
+  if (abs >= LAKH) return render(abs / LAKH, ' L');
+  if (abs >= THOUSAND) return render(abs / THOUSAND, 'K');
+  return render(abs, '');
 }
 
 /** Signed currency for P&L (e.g. -1200 -> "-$1,200.00"). */

@@ -9,6 +9,7 @@ import {
   PeriodOption,
 } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
+import { useCurrency } from '@/components/layout/MarketContext';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 
 const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
@@ -27,6 +28,9 @@ const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
  */
 export function HistoricalPanel({ clientId }: { clientId: string }) {
   const { toast } = useToast();
+  // Every money figure on this panel is in the selected book's currency — an
+  // Indian mandate's opening/closing values and per-position prices are rupees.
+  const currency = useCurrency();
 
   /**
    * ONE control drives the whole tab. Selecting a period sets both the return
@@ -223,16 +227,16 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
         {periodReturn ? (
           <>
             <p className="mt-3 text-[12px] text-ink-tertiary">
-              {periodReturn.label} · {periodReturn.from.slice(0, 10)} → {periodReturn.to.slice(0, 10)}
-              {periodReturn.openPeriod && ' · period still open, measured to today'}
-              {periodReturn.clampedToInception && ' · start pulled forward to inception'}
+              {periodReturn.label} Â· {periodReturn.from.slice(0, 10)} â†’ {periodReturn.to.slice(0, 10)}
+              {periodReturn.openPeriod && ' Â· period still open, measured to today'}
+              {periodReturn.clampedToInception && ' Â· start pulled forward to inception'}
             </p>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatTile
                 label={`Opening value (${periodReturn.from.slice(0, 10)})`}
-                value={formatCurrency(periodReturn.openingValue)}
+                value={formatCurrency(periodReturn.openingValue, currency)}
               />
-              <StatTile label="Closing value" value={formatCurrency(periodReturn.closingValue)} />
+              <StatTile label="Closing value" value={formatCurrency(periodReturn.closingValue, currency)} />
               <StatTile
                 label={`${periodReturn.label} return`}
                 value={periodReturn.returnPct !== null ? signedPct(periodReturn.returnPct) : 'Not available'}
@@ -310,23 +314,23 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
               }
             />
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatTile label="Portfolio value" value={formatCurrency(asOf.portfolioValue)} />
-              <StatTile label="Cash" value={formatCurrency(asOf.cash)} />
+              <StatTile label="Portfolio value" value={formatCurrency(asOf.portfolioValue, currency)} />
+              <StatTile label="Cash" value={formatCurrency(asOf.cash, currency)} />
               <StatTile
                 label="Unrealized gain"
-                value={formatSignedCurrency(asOf.unrealizedGain)}
+                value={formatSignedCurrency(asOf.unrealizedGain, currency)}
                 tone={asOf.unrealizedGain >= 0 ? 'pos' : 'neg'}
               />
               <StatTile
                 label="Realized gain (since baseline)"
-                value={formatSignedCurrency(asOf.realizedGain)}
+                value={formatSignedCurrency(asOf.realizedGain, currency)}
                 tone={asOf.realizedGain >= 0 ? 'pos' : 'neg'}
               />
             </div>
             {asOf.cashShortfall > 0 && (
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
                 Cash is shown as zero: replaying the ledger to this date left it{' '}
-                {formatCurrency(asOf.cashShortfall)} below zero, which means some proceeds are
+                {formatCurrency(asOf.cashShortfall, currency)} below zero, which means some proceeds are
                 recorded without their matching purchase. Allocation weights are computed on the
                 floored balance, so they stay correct — but the ledger gap is worth closing.
               </p>
@@ -365,13 +369,13 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
                           {p.quantity.toLocaleString()}
                         </td>
                         <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                          {formatCurrency(p.averageCost)}
+                          {formatCurrency(p.averageCost, currency)}
                         </td>
                         <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                          {formatCurrency(p.closingPrice)}
+                          {formatCurrency(p.closingPrice, currency)}
                         </td>
                         <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                          {formatCurrency(p.marketValue)}
+                          {formatCurrency(p.marketValue, currency)}
                         </td>
                         <td className="py-2.5 text-right tabular-nums text-ink-secondary">
                           {pct(p.weight)}
@@ -382,7 +386,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
                             p.unrealizedGain >= 0 ? 'text-emerald-600' : 'text-rose-600',
                           )}
                         >
-                          {formatSignedCurrency(p.unrealizedGain)}
+                          {formatSignedCurrency(p.unrealizedGain, currency)}
                         </td>
                       </tr>
                     ))}

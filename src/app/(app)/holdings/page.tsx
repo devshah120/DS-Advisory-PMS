@@ -9,6 +9,7 @@ import {
   PiggyBank,
   Trash2,
   Tag,
+  Users,
   ChevronRight,
   Upload,
   Download,
@@ -19,7 +20,12 @@ import {
 import { apiClient } from '@/lib/api';
 import { clientsApi } from '@/lib/clients.api';
 import { holdingsApi, type BulkImportSummary } from '@/lib/holdings.api';
-import { downloadClientHoldingsWorkbook } from '@/lib/holdingsExport';
+import { familiesApi } from '@/lib/families.api';
+import {
+  downloadClientHoldingsWorkbook,
+  downloadFamilyHoldingsWorkbook,
+  type HoldingsExportRow,
+} from '@/lib/holdingsExport';
 import {
   formatCurrency,
   formatCompactCurrency,
@@ -28,8 +34,10 @@ import {
   formatSignedPct,
   cn,
 } from '@/lib/utils';
-import { Holding, Client } from '@/types';
+import { Holding, Client, Family, FamilyAggregate, FamilyPosition } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
+import { displayTicker } from '@/lib/market-scope';
 import {
   Card,
   Tabs,
@@ -78,7 +86,28 @@ interface SectorRow {
   marketValue: number;
   pnl: number;
   weight: number;
-} 
+}
+
+/**
+ * A household in the "By Client" table.
+ *
+ * Families sit alongside individual mandates rather than replacing them: the
+ * desk reasons about both, and an account is not "gone" because it belongs to
+ * a family. Figures here are the merged household totals, so a stock held in
+ * three of the family's accounts contributes its combined size once.
+ */
+interface FamilyRow {
+  familyId: string;
+  familyName: string;
+  /** How many mandates the household holds. */
+  accounts: number;
+  /** Distinct symbols AFTER merging — the household's real name count. */
+  positions: number;
+  marketValue: number;
+  pnl: number;
+  cashBalance: number;
+  portfolioValue: number;
+}
 
 /** One position inside a client's drill-down, mirroring the portfolio sheet layout. */
 interface ClientPositionRow {
@@ -152,6 +181,13 @@ function openPositions<T extends { quantity: number }>(rows: T[]): T[] {
 
 export default function HoldingsPage() {
   const { toast } = useToast();
+  // The selected book. `currency` drives every money column on this page, so an
+  // Indian portfolio renders in rupees with lakh/crore grouping throughout.
+  const { market, meta, ready: marketReady } = useMarket();
+  const currency = meta.currency;
+  // The Indian book leads with company names rather than tickers — see the
+  // symbol column and the "By Company" tab below.
+  const isIndia = market === 'INDIA';
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   /**
    * The full client roster. /holdings alone cannot answer "who does NOT own
@@ -165,6 +201,21 @@ export default function HoldingsPage() {
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
   const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
   const [activeSymbol, setActiveSymbol] = useState<SymbolRow | null>(null);
+
+  // --- families (households) ---
+  /** The book's households, listed beside individual clients in the By Client tab. */
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [activeFamily, setActiveFamily] = useState<FamilyRow | null>(null);
+  /**
+   * The opened household's merged portfolio, fetched on demand.
+   *
+   * Deliberately server-side rather than merged in the browser from `holdings`:
+   * the API values every lot at a live quote and blends cost by weight, and
+   * duplicating that arithmetic here is exactly how two screens end up
+   * disagreeing about what a family owns.
+   */
+  const [familyAggregate, setFamilyAggregate] = useState<FamilyAggregate | null>(null);
+  const [familyLoading, setFamilyLoading] = useState(false);
 
   // --- bulk import ---
   const [importOpen, setImportOpen] = useState(false);
@@ -185,7 +236,10 @@ export default function HoldingsPage() {
 
   async function loadHoldings() {
     try {
-      const res = await apiClient.getClient().get('/holdings');
+      // Scoped to the selected book — the Indian and US books are separate
+      // portfolios and must never appear in one table, not least because their
+      // market values are in different currencies.
+      const res = await apiClient.getClient().get('/holdings', { params: { market } });
       setHoldings(openPositions(res.data));
     } catch {
       toast({ tone: 'error', title: 'Failed to load holdings' });
@@ -206,17 +260,63 @@ export default function HoldingsPage() {
       // limit is deliberately high: this is a book of a handful of mandates and
       // the panel is only correct if it sees every one of them. A default page
       // size would quietly truncate the roster and under-report non-holders.
-      setAllClients(await clientsApi.list({ limit: 500 }));
+      setAllClients(await clientsApi.list({ limit: 500, market }));
     } catch {
       setAllClients([]);
     }
   }
 
+  /**
+   * The book's households. A failure here leaves the client table showing
+   * individual mandates only — the page's primary job — rather than failing.
+   */
+  async function loadFamilies() {
+    try {
+      setFamilies(await familiesApi.list(market));
+    } catch {
+      setFamilies([]);
+    }
+  }
+
+  // Reloaded on every book change, so switching country re-scopes the whole
+  // page rather than leaving the previous book's positions on screen.
   useEffect(() => {
+    if (!marketReady) return;
+    setLoading(true);
     loadHoldings();
     loadClients();
+    loadFamilies();
+    // A household from the previous book must not stay open across a switch.
+    setActiveFamily(null);
+    setFamilyAggregate(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
+
+  // The merged household portfolio is fetched when one is opened, not upfront:
+  // it costs a live quote per distinct symbol, and most sessions never open one.
+  useEffect(() => {
+    if (!activeFamily) {
+      setFamilyAggregate(null);
+      return;
+    }
+
+    let cancelled = false;
+    setFamilyLoading(true);
+    familiesApi
+      .aggregate(activeFamily.familyId)
+      .then((data) => !cancelled && setFamilyAggregate(data))
+      .catch(() => {
+        if (cancelled) return;
+        setFamilyAggregate(null);
+        toast({ tone: 'error', title: 'Could not load the family portfolio' });
+      })
+      .finally(() => !cancelled && setFamilyLoading(false));
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFamily]);
 
   function openImport() {
     setImportFile(null);
@@ -361,6 +461,52 @@ export default function HoldingsPage() {
     }
   }
 
+  /**
+   * The household's merged book as the firm's formatted workbook — the same
+   * sheet an individual client's export produces, so a family review and a
+   * single-mandate review hand the client the same-looking document.
+   *
+   * Rows arrive already sorted and filtered by the table, so whatever the user
+   * is looking at is what gets exported. Weight comes from the server's
+   * aggregate rather than being recomputed here: it is the share of the whole
+   * household portfolio (cash included), and re-deriving it from a filtered
+   * subset would silently rebase every percentage.
+   */
+  async function handleExportFamily(rows: FamilyPosition[]) {
+    if (!activeFamily || !familyAggregate) return;
+
+    const exportRows: HoldingsExportRow[] = rows.map((p, i) => ({
+      srNo: i + 1,
+      symbol: p.displayTicker,
+      name: p.company,
+      sector: p.sector || 'Uncategorized',
+      quantity: p.quantity,
+      averageCostBasis: p.averageCost,
+      costBasisTotal: p.costBasis,
+      lastPrice: p.currentPrice,
+      currentValue: p.marketValue,
+      pl: p.unrealizedPnL,
+      plPercent: p.unrealizedPnLPercent,
+      allocPercent: p.weight,
+      accounts: p.accounts,
+    }));
+
+    try {
+      await downloadFamilyHoldingsWorkbook(
+        activeFamily.familyName,
+        exportRows,
+        familyAggregate.totals.cashBalance,
+      );
+      toast({
+        tone: 'success',
+        title: 'Family portfolio exported',
+        description: `${exportRows.length} merged position${exportRows.length === 1 ? '' : 's'} downloaded`,
+      });
+    } catch {
+      toast({ tone: 'error', title: 'Could not export the family portfolio' });
+    }
+  }
+
   const symbolRows: SymbolRow[] = useMemo(() => {
     const map = new Map<string, SymbolRow>();
     holdings.forEach((h) => {
@@ -383,8 +529,14 @@ export default function HoldingsPage() {
       cur.accounts += 1;
       map.set(h.ticker, cur);
     });
-    return [...map.values()].sort((a, b) => b.totalMarketValue - a.totalMarketValue);
-  }, [holdings]);
+    const rows = [...map.values()];
+    // The Indian book is discussed by company name — a manager says "Finolex
+    // Cables", not "FINCABLES.NS" — so it reads as an alphabetical roster of
+    // names. The US book stays ordered by conviction (largest position first).
+    return market === 'INDIA'
+      ? rows.sort((a, b) => (a.company ?? '').localeCompare(b.company ?? '', 'en-IN'))
+      : rows.sort((a, b) => b.totalMarketValue - a.totalMarketValue);
+  }, [holdings, market]);
 
   const clientRows: ClientRow[] = useMemo(() => {
     const map = new Map<string, ClientRow>();
@@ -421,6 +573,77 @@ export default function HoldingsPage() {
       })
       .sort((a, b) => b.marketValue - a.marketValue);
   }, [holdings]);
+
+  /**
+   * Household summary rows for the By Client table.
+   *
+   * Derived from the positions already on the page rather than fetched, so the
+   * table paints with everything else; the drawer then loads the authoritative
+   * merged view. Positions are counted as DISTINCT symbols across the
+   * household's accounts — the whole point of a family view is that one name
+   * held by four members is one position, not four.
+   */
+  const familyRows: FamilyRow[] = useMemo(() => {
+    if (families.length === 0) return [];
+
+    // clientId -> family, so each lot can be attributed in one pass.
+    const familyOf = new Map<string, Family>();
+    for (const family of families) {
+      for (const member of family.members) familyOf.set(member.id, family);
+    }
+
+    const map = new Map<string, FamilyRow & { symbols: Set<string>; clientIds: Set<string> }>();
+
+    for (const h of holdings) {
+      const family = familyOf.get(h.clientId);
+      if (!family) continue;
+
+      const cur =
+        map.get(family.id) ??
+        {
+          familyId: family.id,
+          familyName: family.name,
+          accounts: 0,
+          positions: 0,
+          marketValue: 0,
+          pnl: 0,
+          cashBalance: 0,
+          portfolioValue: 0,
+          symbols: new Set<string>(),
+          clientIds: new Set<string>(),
+        };
+
+      cur.marketValue += h.marketValue;
+      cur.pnl += h.unrealizedPnL;
+      cur.symbols.add(h.ticker);
+      cur.clientIds.add(h.clientId);
+      map.set(family.id, cur);
+    }
+
+    // Cash comes from the roster, not the lots: a member holding cash but no
+    // positions contributes no holding rows at all, and their balance is still
+    // the household's buying power.
+    const cashOf = new Map(allClients.map((c) => [c.id, c.cashBalance ?? 0]));
+
+    return families
+      .map((family) => {
+        const acc = map.get(family.id);
+        const cashBalance = family.members.reduce((s, m) => s + (cashOf.get(m.id) ?? 0), 0);
+        const marketValue = acc?.marketValue ?? 0;
+        return {
+          familyId: family.id,
+          familyName: family.name,
+          // Every member counts, including one holding nothing yet.
+          accounts: family.members.length,
+          positions: acc?.symbols.size ?? 0,
+          marketValue,
+          pnl: acc?.pnl ?? 0,
+          cashBalance,
+          portfolioValue: marketValue + cashBalance,
+        };
+      })
+      .sort((a, b) => b.marketValue - a.marketValue);
+  }, [families, holdings, allClients]);
 
   const totalMv = holdings.reduce((s, h) => s + h.marketValue, 0);
   const totalPnl = holdings.reduce((s, h) => s + h.unrealizedPnL, 0);
@@ -662,25 +885,39 @@ export default function HoldingsPage() {
   const symbolColumns: Column<SymbolRow>[] = [
     {
       key: 'symbol',
-      header: 'Symbol',
-      accessor: (r) => r.symbol,
+      // Indian holdings are identified by company name, so the name is the
+      // headline and the ticker becomes the subtitle — the reverse of the US
+      // book, where the symbol is how a position is named and searched.
+      header: isIndia ? 'Company' : 'Symbol',
+      // Sorting follows whichever line is the headline, so clicking the header
+      // orders by the text the reader is actually scanning down.
+      accessor: (r) => (isIndia ? (r.company ?? '') : r.symbol),
       render: (r) => (
         <div className="flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-2xs font-bold text-ink-secondary">
             {r.symbol.slice(0, 4)}
           </span>
-          <div>
-            <p className="font-semibold text-ink group-hover:text-brand">{r.symbol}</p>
-            <p className="max-w-[180px] truncate text-xs text-ink-tertiary">{r.company}</p>
-          </div>
+          {isIndia ? (
+            <div>
+              <p className="max-w-[220px] truncate font-semibold text-ink group-hover:text-brand">
+                {r.company || displayTicker(r.symbol)}
+              </p>
+              <p className="text-xs text-ink-tertiary">{displayTicker(r.symbol)}</p>
+            </div>
+          ) : (
+            <div>
+              <p className="font-semibold text-ink group-hover:text-brand">{r.symbol}</p>
+              <p className="max-w-[180px] truncate text-xs text-ink-tertiary">{r.company}</p>
+            </div>
+          )}
           <ChevronRight className="h-4 w-4 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       ),
     },
     { key: 'sector', header: 'Sector', accessor: (r) => r.sector, render: (r) => <Badge tone="neutral">{r.sector}</Badge> },
     { key: 'totalQuantity', header: 'Quantity', accessor: (r) => r.totalQuantity, align: 'right', render: (r) => r.totalQuantity.toLocaleString() },
-    { key: 'currentPrice', header: 'Price', accessor: (r) => r.currentPrice, align: 'right', render: (r) => formatCurrency(r.currentPrice) },
-    { key: 'totalMarketValue', header: 'Market Value', accessor: (r) => r.totalMarketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.totalMarketValue)}</span> },
+    { key: 'currentPrice', header: 'Price', accessor: (r) => r.currentPrice, align: 'right', render: (r) => formatCurrency(r.currentPrice, currency) },
+    { key: 'totalMarketValue', header: 'Market Value', accessor: (r) => r.totalMarketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.totalMarketValue, currency)}</span> },
     { key: 'accounts', header: 'Accounts', accessor: (r) => r.accounts, align: 'center', defaultHidden: true },
     {
       key: 'changePercent',
@@ -696,7 +933,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.totalPnL >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.totalPnL)}
+          {formatSignedCurrency(r.totalPnL, currency)}
         </span>
       ),
     },
@@ -718,7 +955,7 @@ export default function HoldingsPage() {
       ),
     },
     { key: 'holdings', header: 'Holdings', accessor: (r) => r.holdings, align: 'center' },
-    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue)}</span> },
+    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue, currency)}</span> },
     {
       key: 'cashBalance',
       header: 'Cash',
@@ -726,7 +963,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('tabular-nums', r.cashBalance > 0 ? 'text-ink' : 'text-ink-tertiary')}>
-          {formatCurrency(r.cashBalance)}
+          {formatCurrency(r.cashBalance, currency)}
         </span>
       ),
     },
@@ -744,7 +981,7 @@ export default function HoldingsPage() {
         </div>
       ),
     },
-    { key: 'portfolioValue', header: 'Portfolio Value', accessor: (r) => r.portfolioValue, align: 'right', render: (r) => formatCurrency(r.portfolioValue) },
+    { key: 'portfolioValue', header: 'Portfolio Value', accessor: (r) => r.portfolioValue, align: 'right', render: (r) => formatCurrency(r.portfolioValue, currency) },
     {
       key: 'pnl',
       header: 'P&L',
@@ -752,8 +989,169 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.pnl >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.pnl)}
+          {formatSignedCurrency(r.pnl, currency)}
         </span>
+      ),
+    },
+  ];
+
+  const familyColumns: Column<FamilyRow>[] = [
+    {
+      key: 'familyName',
+      header: 'Family',
+      accessor: (r) => r.familyName,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-warning to-brand-active text-white">
+            <Users className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="font-semibold text-ink group-hover:text-brand">{r.familyName}</p>
+            <p className="text-2xs text-ink-tertiary">
+              {r.accounts} account{r.accounts === 1 ? '' : 's'} combined
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
+        </div>
+      ),
+    },
+    {
+      key: 'positions',
+      header: 'Positions',
+      accessor: (r) => r.positions,
+      align: 'center',
+      // Distinct names after merging — duplicates across the accounts are one.
+      render: (r) => <span className="tabular-nums">{r.positions}</span>,
+    },
+    {
+      key: 'marketValue',
+      header: 'Market Value',
+      accessor: (r) => r.marketValue,
+      align: 'right',
+      render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue, currency)}</span>,
+    },
+    {
+      key: 'cashBalance',
+      header: 'Cash',
+      accessor: (r) => r.cashBalance,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('tabular-nums', r.cashBalance > 0 ? 'text-ink' : 'text-ink-tertiary')}>
+          {formatCurrency(r.cashBalance, currency)}
+        </span>
+      ),
+    },
+    {
+      key: 'portfolioValue',
+      header: 'Portfolio Value',
+      accessor: (r) => r.portfolioValue,
+      align: 'right',
+      render: (r) => formatCurrency(r.portfolioValue, currency),
+    },
+    {
+      key: 'pnl',
+      header: 'P&L',
+      accessor: (r) => r.pnl,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.pnl >= 0 ? 'text-success' : 'text-danger')}>
+          {formatSignedCurrency(r.pnl, currency)}
+        </span>
+      ),
+    },
+  ];
+
+  /** One merged household position — the family drawer's main table. */
+  const familyPositionColumns: Column<FamilyPosition>[] = [
+    {
+      key: 'displayTicker',
+      header: 'Symbol',
+      accessor: (r) => r.displayTicker,
+      render: (r) => (
+        <div>
+          <p className="font-semibold text-ink">{r.displayTicker}</p>
+          <p className="max-w-[200px] truncate text-2xs text-ink-tertiary">{r.company}</p>
+        </div>
+      ),
+    },
+    { key: 'sector', header: 'Sector', accessor: (r) => r.sector },
+    {
+      key: 'accounts',
+      header: 'Accounts',
+      accessor: (r) => r.accounts,
+      align: 'center',
+      // How many of the household's mandates hold the name — 3 of 5 is a real
+      // signal about how concentrated the family's conviction is.
+      render: (r) => (
+        <Badge tone={r.accounts > 1 ? 'brand' : 'neutral'}>{r.accounts}</Badge>
+      ),
+    },
+    {
+      key: 'quantity',
+      header: 'Quantity',
+      accessor: (r) => r.quantity,
+      align: 'right',
+      render: (r) => r.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+    },
+    {
+      key: 'averageCost',
+      header: 'Avg. Cost',
+      accessor: (r) => r.averageCost,
+      align: 'right',
+      // Cost-weighted across the accounts, not the mean of their averages.
+      render: (r) => formatCurrency(r.averageCost, currency),
+    },
+    {
+      key: 'costBasis',
+      header: 'Cost Basis',
+      accessor: (r) => r.costBasis,
+      align: 'right',
+      render: (r) => formatCurrency(r.costBasis, currency),
+    },
+    {
+      key: 'currentPrice',
+      header: 'Last Price',
+      accessor: (r) => r.currentPrice,
+      align: 'right',
+      render: (r) => formatCurrency(r.currentPrice, currency),
+    },
+    {
+      key: 'marketValue',
+      header: 'Current Value',
+      accessor: (r) => r.marketValue,
+      align: 'right',
+      render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue, currency)}</span>,
+    },
+    {
+      key: 'unrealizedPnL',
+      header: 'PL',
+      accessor: (r) => r.unrealizedPnL,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.unrealizedPnL >= 0 ? 'text-success' : 'text-danger')}>
+          {formatSignedCurrency(r.unrealizedPnL, currency)}
+        </span>
+      ),
+    },
+    {
+      key: 'unrealizedPnLPercent',
+      header: '%PL',
+      accessor: (r) => r.unrealizedPnLPercent,
+      align: 'right',
+      render: (r) => <PnlPill pct={r.unrealizedPnLPercent} />,
+    },
+    {
+      key: 'weight',
+      header: '%Alloc',
+      accessor: (r) => r.weight,
+      align: 'right',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-3">
+            <div className="h-full rounded-full bg-brand" style={{ width: `${Math.min(r.weight, 100)}%` }} />
+          </div>
+          <span className="w-12 text-right tabular-nums text-ink-secondary">{formatPct(r.weight)}</span>
+        </div>
       ),
     },
   ];
@@ -773,15 +1171,15 @@ export default function HoldingsPage() {
       render: (r) => <span className="block max-w-[220px] truncate text-ink-secondary">{r.name}</span>,
     },
     { key: 'quantity', header: 'Quantity', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
-    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis) },
-    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal) },
-    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice) },
+    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis, currency) },
+    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal, currency) },
+    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice, currency) },
     {
       key: 'currentValue',
       header: 'Current Value',
       accessor: (r) => r.currentValue,
       align: 'right',
-      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue)}</span>,
+      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue, currency)}</span>,
     },
     {
       key: 'pl',
@@ -790,7 +1188,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.pl)}
+          {formatSignedCurrency(r.pl, currency)}
         </span>
       ),
     },
@@ -866,15 +1264,15 @@ export default function HoldingsPage() {
       render: (r) => <span className="text-ink-secondary">{r.clientName}</span>,
     },
     { key: 'quantity', header: 'Quantity', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
-    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis) },
-    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal) },
-    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice) },
+    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis, currency) },
+    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal, currency) },
+    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice, currency) },
     {
       key: 'currentValue',
       header: 'Current Value',
       accessor: (r) => r.currentValue,
       align: 'right',
-      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue)}</span>,
+      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue, currency)}</span>,
     },
     {
       key: 'pl',
@@ -883,7 +1281,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.pl)}
+          {formatSignedCurrency(r.pl, currency)}
         </span>
       ),
     },
@@ -926,15 +1324,15 @@ export default function HoldingsPage() {
       ),
     },
     { key: 'quantity', header: 'Quantity', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
-    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis) },
-    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal) },
-    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice) },
+    { key: 'averageCostBasis', header: 'Average Cost Basis', accessor: (r) => r.averageCostBasis, align: 'right', render: (r) => formatCurrency(r.averageCostBasis, currency) },
+    { key: 'costBasisTotal', header: 'Cost Basis Total', accessor: (r) => r.costBasisTotal, align: 'right', render: (r) => formatCurrency(r.costBasisTotal, currency) },
+    { key: 'lastPrice', header: 'Last Price', accessor: (r) => r.lastPrice, align: 'right', render: (r) => formatCurrency(r.lastPrice, currency) },
     {
       key: 'currentValue',
       header: 'Current Value',
       accessor: (r) => r.currentValue,
       align: 'right',
-      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue)}</span>,
+      render: (r) => <span className="font-semibold">{formatCurrency(r.currentValue, currency)}</span>,
     },
     {
       key: 'pl',
@@ -943,7 +1341,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.pl)}
+          {formatSignedCurrency(r.pl, currency)}
         </span>
       ),
     },
@@ -997,7 +1395,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) =>
         r.bookValue > 0 ? (
-          formatCurrency(r.bookValue)
+          formatCurrency(r.bookValue, currency)
         ) : (
           // A genuinely empty book is a real state worth naming, not a $0 cell.
           <span className="text-ink-tertiary">No holdings</span>
@@ -1010,7 +1408,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.cashBalance > 0 ? 'text-ink' : 'text-ink-tertiary')}>
-          {formatCurrency(r.cashBalance)}
+          {formatCurrency(r.cashBalance, currency)}
         </span>
       ),
     },
@@ -1046,7 +1444,7 @@ export default function HoldingsPage() {
         </div>
       ),
     },
-    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue)}</span> },
+    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue, currency)}</span> },
     {
       key: 'pnl',
       header: 'P&L',
@@ -1054,7 +1452,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.pnl >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.pnl)}
+          {formatSignedCurrency(r.pnl, currency)}
         </span>
       ),
     },
@@ -1075,9 +1473,9 @@ export default function HoldingsPage() {
     { key: 'client', header: 'Client', accessor: (r) => r.client?.name ?? '', render: (r) => r.client?.name ?? '—' },
     { key: 'sector', header: 'Sector', accessor: (r) => r.sector, render: (r) => <Badge tone="neutral">{r.sector}</Badge>, defaultHidden: true },
     { key: 'quantity', header: 'Qty', accessor: (r) => r.quantity, align: 'right', render: (r) => r.quantity.toLocaleString() },
-    { key: 'averageCost', header: 'Avg Cost', accessor: (r) => r.averageCost, align: 'right', render: (r) => formatCurrency(r.averageCost) },
-    { key: 'currentPrice', header: 'Price', accessor: (r) => r.currentPrice, align: 'right', render: (r) => formatCurrency(r.currentPrice) },
-    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue)}</span> },
+    { key: 'averageCost', header: 'Avg Cost', accessor: (r) => r.averageCost, align: 'right', render: (r) => formatCurrency(r.averageCost, currency) },
+    { key: 'currentPrice', header: 'Price', accessor: (r) => r.currentPrice, align: 'right', render: (r) => formatCurrency(r.currentPrice, currency) },
+    { key: 'marketValue', header: 'Market Value', accessor: (r) => r.marketValue, align: 'right', render: (r) => <span className="font-semibold">{formatCurrency(r.marketValue, currency)}</span> },
     {
       key: 'unrealizedPnL',
       header: 'P&L',
@@ -1085,7 +1483,7 @@ export default function HoldingsPage() {
       align: 'right',
       render: (r) => (
         <span className={cn('font-semibold', r.unrealizedPnL >= 0 ? 'text-success' : 'text-danger')}>
-          {formatSignedCurrency(r.unrealizedPnL)}
+          {formatSignedCurrency(r.unrealizedPnL, currency)}
         </span>
       ),
     },
@@ -1117,17 +1515,17 @@ export default function HoldingsPage() {
       <div className="space-y-6">
         {/* Summary */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Total Market Value" value={formatCompactCurrency(totalMv)} />
+          <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Total Market Value" value={formatCompactCurrency(totalMv, currency)} />
           <SummaryTile
             icon={<PiggyBank className="h-4 w-4" />}
             label="Deployable Cash"
-            value={formatCompactCurrency(totalCash)}
+            value={formatCompactCurrency(totalCash, currency)}
             hint={totalMv + totalCash > 0 ? `${formatPct((totalCash / (totalMv + totalCash)) * 100)} of assets` : undefined}
           />
           <SummaryTile
             icon={<TrendingUp className="h-4 w-4" />}
             label="Unrealized P&L"
-            value={formatSignedCurrency(totalPnl)}
+            value={formatSignedCurrency(totalPnl, currency)}
             tone={totalPnl >= 0 ? 'success' : 'danger'}
           />
           <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Positions" value={String(holdings.length)} />
@@ -1138,7 +1536,7 @@ export default function HoldingsPage() {
         <div className="flex items-center justify-between">
           <Tabs
             tabs={[
-              { value: 'symbols', label: 'By Symbol', count: symbolRows.length },
+              { value: 'symbols', label: isIndia ? 'By Company' : 'By Symbol', count: symbolRows.length },
               { value: 'clients', label: 'By Client', count: clientRows.length },
               { value: 'sectors', label: 'By Sector', count: sectorRows.length },
               { value: 'all', label: 'All Positions', count: holdings.length },
@@ -1155,7 +1553,12 @@ export default function HoldingsPage() {
             data={symbolRows}
             loading={loading}
             rowKey={(r) => r.symbol}
-            searchPlaceholder="Search symbols or companies…"
+            // The symbol column's accessor narrows to the headline field, so
+            // spell the haystack out here — a manager must still be able to
+            // find a holding by ticker on the Indian book, where the ticker is
+            // no longer the sorted column.
+            searchKeys={(r) => `${r.symbol} ${displayTicker(r.symbol)} ${r.company ?? ''} ${r.sector ?? ''}`}
+            searchPlaceholder={isIndia ? 'Search companies or symbols…' : 'Search symbols or companies…'}
             onRowClick={(r) => setActiveSymbol(r)}
             onExport={(rows) => {
               exportToCsv('holdings-by-symbol.csv', symbolColumns, rows);
@@ -1167,18 +1570,58 @@ export default function HoldingsPage() {
         )}
 
         {view === 'clients' && (
-          <DataTable
-            columns={clientColumns}
-            data={clientRows}
-            loading={loading}
-            rowKey={(r) => r.clientId}
-            searchPlaceholder="Search clients…"
-            onRowClick={(r) => setActiveClient(r)}
-            onExport={(rows) => {
-              exportToCsv('holdings-by-client.csv', clientColumns, rows);
-              toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
-            }}
-          />
+          <div className="space-y-6">
+            {/*
+              Households come first, above the individual mandates they group.
+              A family is the level the desk reviews at when one exists, and the
+              members remain listed below — the family view is an addition to
+              the account list, never a replacement for it.
+            */}
+            {familyRows.length > 0 && (
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <Users className="h-4 w-4 text-ink-secondary" />
+                  <h3 className="text-[13px] font-semibold text-ink">Families</h3>
+                  <span className="text-2xs text-ink-tertiary">
+                    Combined household positions, duplicates merged
+                  </span>
+                </div>
+                <DataTable
+                  columns={familyColumns}
+                  data={familyRows}
+                  loading={loading}
+                  rowKey={(r) => r.familyId}
+                  searchPlaceholder="Search families…"
+                  onRowClick={(r) => setActiveFamily(r)}
+                  onExport={(rows) => {
+                    exportToCsv('holdings-by-family.csv', familyColumns, rows);
+                    toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+                  }}
+                />
+              </div>
+            )}
+
+            <div>
+              {familyRows.length > 0 && (
+                <div className="mb-3 flex items-center gap-2">
+                  <Briefcase className="h-4 w-4 text-ink-secondary" />
+                  <h3 className="text-[13px] font-semibold text-ink">Individual Accounts</h3>
+                </div>
+              )}
+              <DataTable
+                columns={clientColumns}
+                data={clientRows}
+                loading={loading}
+                rowKey={(r) => r.clientId}
+                searchPlaceholder="Search clients…"
+                onRowClick={(r) => setActiveClient(r)}
+                onExport={(rows) => {
+                  exportToCsv('holdings-by-client.csv', clientColumns, rows);
+                  toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
+                }}
+              />
+            </div>
+          </div>
         )}
 
         {view === 'sectors' && (
@@ -1222,6 +1665,143 @@ export default function HoldingsPage() {
         )}
       </div>
 
+      {/* Family drill-down — the integrated household view */}
+      <Drawer
+        isOpen={!!activeFamily}
+        onClose={() => setActiveFamily(null)}
+        title={activeFamily ? `${activeFamily.familyName} — Family Portfolio` : ''}
+        description={
+          activeFamily
+            ? `${activeFamily.accounts} account${activeFamily.accounts === 1 ? '' : 's'} combined · ` +
+              `${activeFamily.positions} unique position${activeFamily.positions === 1 ? '' : 's'} · ` +
+              `${formatCurrency(activeFamily.portfolioValue, currency)} total`
+            : ''
+        }
+        width={1180}
+        maximizable
+      >
+        {activeFamily && (
+          <div className="space-y-5">
+            {familyLoading && (
+              <p className="py-8 text-center text-[13px] text-ink-tertiary">
+                Merging the household&apos;s positions…
+              </p>
+            )}
+
+            {!familyLoading && !familyAggregate && (
+              <p className="py-8 text-center text-[13px] text-ink-tertiary">
+                This family&apos;s combined portfolio could not be loaded.
+              </p>
+            )}
+
+            {!familyLoading && familyAggregate && (
+              <>
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+                  <SummaryTile
+                    icon={<Wallet className="h-4 w-4" />}
+                    label="Cost Basis"
+                    value={formatCurrency(familyAggregate.totals.costBasis, currency)}
+                  />
+                  <SummaryTile
+                    icon={<TrendingUp className="h-4 w-4" />}
+                    label="Market Value"
+                    value={formatCurrency(familyAggregate.totals.marketValue, currency)}
+                    hint={`${formatCurrency(familyAggregate.totals.portfolioValue, currency)} incl. cash`}
+                  />
+                  <SummaryTile
+                    icon={<PiggyBank className="h-4 w-4" />}
+                    label="Cash"
+                    value={formatCurrency(familyAggregate.totals.cashBalance, currency)}
+                    hint="Across every member account"
+                  />
+                  <SummaryTile
+                    icon={<Briefcase className="h-4 w-4" />}
+                    label="Unrealized P&L"
+                    value={formatSignedCurrency(familyAggregate.totals.unrealizedPnL, currency)}
+                    hint={formatSignedPct(familyAggregate.totals.unrealizedPnLPercent)}
+                    tone={familyAggregate.totals.unrealizedPnL >= 0 ? 'success' : 'danger'}
+                  />
+                  <SummaryTile
+                    icon={<Layers className="h-4 w-4" />}
+                    label="Unique Positions"
+                    value={String(familyAggregate.totals.positionCount)}
+                    // The gap between the two is the point of the merge: 18 lots
+                    // across the accounts may be only 11 distinct names.
+                    hint={`from ${familyAggregate.totals.lotCount} account lot${
+                      familyAggregate.totals.lotCount === 1 ? '' : 's'
+                    }`}
+                  />
+                </div>
+
+                {/* Member accounts making up the household */}
+                <Card padding="md">
+                  <p className="mb-3 text-[13px] font-semibold text-ink">Member Accounts</p>
+                  <div className="flex flex-wrap gap-2">
+                    {familyAggregate.members.map((m) => (
+                      <span
+                        key={m.id}
+                        className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-2xs"
+                      >
+                        <span className="font-medium text-ink">{m.name}</span>
+                        <span className="tabular-nums text-ink-tertiary">
+                          {formatCurrency(m.portfolioValue, currency)}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* Combined sector allocation */}
+                {familyAggregate.sectorAllocation.length > 0 && (
+                  <Card padding="md">
+                    <p className="mb-3 text-[13px] font-semibold text-ink">
+                      Sector Allocation
+                      <span className="ml-2 text-2xs font-normal text-ink-tertiary">
+                        across the combined household portfolio
+                      </span>
+                    </p>
+                    <div className="space-y-2.5">
+                      {familyAggregate.sectorAllocation.map((s) => (
+                        <div key={s.sector} className="flex items-center gap-3">
+                          <span className="w-40 shrink-0 truncate text-2xs text-ink-secondary">
+                            {s.sector}
+                          </span>
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-3">
+                            <div
+                              className="h-full rounded-full bg-brand"
+                              style={{ width: `${Math.min(100, s.weight)}%` }}
+                            />
+                          </div>
+                          <span className="w-16 shrink-0 text-right text-2xs tabular-nums text-ink-secondary">
+                            {formatPct(s.weight)}
+                          </span>
+                          <span className="w-28 shrink-0 text-right text-2xs tabular-nums text-ink-tertiary">
+                            {formatCompactCurrency(s.marketValue, currency)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Merged positions */}
+                <DataTable
+                  columns={familyPositionColumns}
+                  data={familyAggregate.positions}
+                  rowKey={(r) => r.ticker}
+                  searchPlaceholder="Search the family's positions…"
+                  emptyTitle="No open positions"
+                  emptyDescription="No member of this family holds an open position yet."
+                  onExport={(rows) => {
+                    void handleExportFamily(rows);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </Drawer>
+
       {/* Client drill-down */}
       <Drawer
         isOpen={!!activeClient}
@@ -1231,7 +1811,7 @@ export default function HoldingsPage() {
           activeClient
             ? `${clientPositions.length} position${clientPositions.length === 1 ? '' : 's'} · ${formatCurrency(
                 clientTotals.currentValue
-              )} invested · ${formatCurrency(activeClient.cashBalance)} cash (${formatPct(
+              , currency)} invested · ${formatCurrency(activeClient.cashBalance, currency)} cash (${formatPct(
                 activeClient.cashWeight
               )} of portfolio)`
             : ''
@@ -1242,27 +1822,27 @@ export default function HoldingsPage() {
         {activeClient && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(clientTotals.costBasisTotal)} />
+              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(clientTotals.costBasisTotal, currency)} />
               <SummaryTile
                 icon={<Briefcase className="h-4 w-4" />}
                 label="Current Value"
-                value={formatCurrency(clientTotals.currentValue)}
+                value={formatCurrency(clientTotals.currentValue, currency)}
                 hint={
                   activeClient.cashBalance > 0
-                    ? `${formatCurrency(clientTotals.currentValue + activeClient.cashBalance)} incl. cash`
+                    ? `${formatCurrency(clientTotals.currentValue + activeClient.cashBalance, currency)} incl. cash`
                     : undefined
                 }
               />
               <SummaryTile
                 icon={<PiggyBank className="h-4 w-4" />}
                 label="Cash Available"
-                value={formatCurrency(activeClient.cashBalance)}
+                value={formatCurrency(activeClient.cashBalance, currency)}
                 hint={`${formatPct(activeClient.cashWeight)} of portfolio · deploy or hold`}
               />
               <SummaryTile
                 icon={<TrendingUp className="h-4 w-4" />}
                 label="Unrealized P&L"
-                value={formatSignedCurrency(clientTotals.pl)}
+                value={formatSignedCurrency(clientTotals.pl, currency)}
                 tone={clientTotals.pl >= 0 ? 'success' : 'danger'}
               />
               <SummaryTile
@@ -1359,11 +1939,11 @@ export default function HoldingsPage() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <ConfirmField label="Quantity" value={pendingDelete.quantity.toLocaleString()} />
-              <ConfirmField label="Average Cost" value={formatCurrency(pendingDelete.averageCostBasis)} />
-              <ConfirmField label="Current Value" value={formatCurrency(pendingDelete.currentValue)} />
+              <ConfirmField label="Average Cost" value={formatCurrency(pendingDelete.averageCostBasis, currency)} />
+              <ConfirmField label="Current Value" value={formatCurrency(pendingDelete.currentValue, currency)} />
               <ConfirmField
                 label="Unrealized P&L"
-                value={formatSignedCurrency(pendingDelete.pl)}
+                value={formatSignedCurrency(pendingDelete.pl, currency)}
                 tone={pendingDelete.pl >= 0 ? 'success' : 'danger'}
               />
             </div>
@@ -1386,7 +1966,7 @@ export default function HoldingsPage() {
           activeSector
             ? `${sectorPositions.length} position${sectorPositions.length === 1 ? '' : 's'} · ${formatCurrency(
                 sectorTotals.currentValue
-              )} current value · ${formatPct(activeSector.weight)} of book`
+              , currency)} current value · ${formatPct(activeSector.weight)} of book`
             : ''
         }
         width={1180}
@@ -1395,12 +1975,12 @@ export default function HoldingsPage() {
         {activeSector && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(sectorTotals.costBasisTotal)} />
-              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(sectorTotals.currentValue)} />
+              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(sectorTotals.costBasisTotal, currency)} />
+              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(sectorTotals.currentValue, currency)} />
               <SummaryTile
                 icon={<TrendingUp className="h-4 w-4" />}
                 label="Unrealized P&L"
-                value={formatSignedCurrency(sectorTotals.pl)}
+                value={formatSignedCurrency(sectorTotals.pl, currency)}
                 tone={sectorTotals.pl >= 0 ? 'success' : 'danger'}
               />
               <SummaryTile
@@ -1439,7 +2019,7 @@ export default function HoldingsPage() {
           activeSymbol
             ? `${activeSymbol.company} · ${symbolHolders.length} client${
                 symbolHolders.length === 1 ? '' : 's'
-              } · ${formatCurrency(symbolTotals.currentValue)} current value` +
+              } · ${formatCurrency(symbolTotals.currentValue, currency)} current value` +
               (symbolNonHolders.length ? ` · ${symbolNonHolders.length} not holding` : '')
             : ''
         }
@@ -1449,12 +2029,12 @@ export default function HoldingsPage() {
         {activeSymbol && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(symbolTotals.costBasisTotal)} />
-              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(symbolTotals.currentValue)} />
+              <SummaryTile icon={<Wallet className="h-4 w-4" />} label="Cost Basis" value={formatCurrency(symbolTotals.costBasisTotal, currency)} />
+              <SummaryTile icon={<Briefcase className="h-4 w-4" />} label="Current Value" value={formatCurrency(symbolTotals.currentValue, currency)} />
               <SummaryTile
                 icon={<TrendingUp className="h-4 w-4" />}
                 label="Unrealized P&L"
-                value={formatSignedCurrency(symbolTotals.pl)}
+                value={formatSignedCurrency(symbolTotals.pl, currency)}
                 tone={symbolTotals.pl >= 0 ? 'success' : 'danger'}
               />
               <SummaryTile
@@ -1500,7 +2080,7 @@ export default function HoldingsPage() {
                   <div className="shrink-0 text-right">
                     <p className="text-xs text-ink-tertiary">Undeployed cash</p>
                     <p className="text-sm font-semibold tabular-nums text-ink">
-                      {formatCurrency(nonHolderCash)}
+                      {formatCurrency(nonHolderCash, currency)}
                     </p>
                   </div>
                 )}

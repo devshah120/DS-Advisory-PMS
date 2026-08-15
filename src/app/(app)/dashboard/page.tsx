@@ -6,6 +6,7 @@ import { dashboardApi } from '@/lib/dashboard.api';
 import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/lib/utils';
 import { DashboardOverview, MarketQuote, HoldingMover, ClientMover } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
+import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
 import { SectorPieChart, TopHoldingsList } from '@/components/charts';
 
@@ -13,15 +14,28 @@ export default function DashboardPage() {
   usePageHeading({ title: "Portfolio Overview", subtitle: "Consolidated performance across all managed accounts" });
 
   const { toast } = useToast();
+  // `market` here is the SELECTED BOOK (US / India); `quotes` is the index and
+  // commodity strip. They were both called "market" before the second book
+  // existed, which is exactly the sort of collision worth naming away.
+  const { market, meta, ready: marketReady } = useMarket();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [market, setMarket] = useState<MarketQuote[]>([]);
+  const [quotes, setQuotes] = useState<MarketQuote[]>([]);
   const [marketLoading, setMarketLoading] = useState(true);
 
+  // Currency comes from the RESPONSE, not the selector: mid-switch the selector
+  // already reads INDIA while `overview` still holds the US payload, and
+  // labelling dollars as rupees for even one frame is worse than a late relabel.
+  const currency = overview?.currency ?? meta.currency;
+
   useEffect(() => {
+    // Wait for the persisted book to load, so a saved India selection issues one
+    // request for India rather than flashing the US book first.
+    if (!marketReady) return;
     let mounted = true;
+    setOverviewLoading(true);
     dashboardApi
-      .overview()
+      .overview(market)
       .then((data) => mounted && setOverview(data))
       .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load portfolio overview' }))
       .finally(() => mounted && setOverviewLoading(false));
@@ -29,23 +43,28 @@ export default function DashboardPage() {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
   useEffect(() => {
+    if (!marketReady) return;
     let mounted = true;
+    setMarketLoading(true);
     dashboardApi
-      .marketOverview()
-      .then((data) => mounted && setMarket(data))
+      .marketOverview(market)
+      .then((data) => mounted && setQuotes(data))
       .catch(() => mounted && toast({ tone: 'error', title: 'Failed to load market overview' }))
       .finally(() => mounted && setMarketLoading(false));
     return () => {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [market, marketReady]);
 
-  const indices = market.slice(0, 4);
-  const commodities = market.slice(4);
+  // The server returns this book's indices followed by the shared commodities,
+  // so split on the count rather than a hardcoded 4 — the two books need not
+  // track the same number of indices.
+  const indices = quotes.filter((q) => q.symbol.startsWith('^'));
+  const commodities = quotes.filter((q) => !q.symbol.startsWith('^'));
 
   return (
     <>
@@ -65,7 +84,7 @@ export default function DashboardPage() {
                 index={0}
                 label="Total AUM"
                 value={overview.totalAUM}
-                format={(n) => formatCompactCurrency(n)}
+                format={(n) => formatCompactCurrency(n, currency)}
                 icon={<Landmark className="h-4 w-4" />}
                 accent="brand"
               />
@@ -73,7 +92,7 @@ export default function DashboardPage() {
                 index={1}
                 label="Deployable Cash"
                 value={overview.totalCash}
-                format={(n) => formatCompactCurrency(n)}
+                format={(n) => formatCompactCurrency(n, currency)}
                 icon={<PiggyBank className="h-4 w-4" />}
                 accent="neutral"
                 sublabel={
@@ -104,8 +123,20 @@ export default function DashboardPage() {
 
         {/* ---- Gainers / losers ---- */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <MoverCard title="Top Gainers" rows={overview?.topGainers} loading={overviewLoading} positive />
-          <MoverCard title="Top Losers" rows={overview?.topLosers} loading={overviewLoading} positive={false} />
+          <MoverCard
+            title="Top Gainers"
+            rows={overview?.topGainers}
+            loading={overviewLoading}
+            positive
+            currency={currency}
+          />
+          <MoverCard
+            title="Top Losers"
+            rows={overview?.topLosers}
+            loading={overviewLoading}
+            positive={false}
+            currency={currency}
+          />
         </div>
 
         {/* ---- Sector allocation / Top holdings ---- */}
@@ -164,7 +195,11 @@ export default function DashboardPage() {
           <Card className="flex flex-col">
             <CardHeader title="Client Day Change" subtitle="Each client's portfolio, today vs. prior close" />
             <div className="mt-4">
-              <ClientMoversTable rows={overview?.clientMovers} loading={overviewLoading} />
+              <ClientMoversTable
+                rows={overview?.clientMovers}
+                loading={overviewLoading}
+                currency={currency}
+              />
             </div>
           </Card>
         </div>
@@ -187,11 +222,13 @@ function MoverCard({
   rows,
   loading,
   positive,
+  currency,
 }: {
   title: string;
   rows?: HoldingMover[];
   loading: boolean;
   positive: boolean;
+  currency: string;
 }) {
   return (
     <Card>
@@ -220,14 +257,18 @@ function MoverCard({
           rows.map((row) => (
             <div key={row.ticker + row.clientId} className="flex items-center justify-between border-b border-border py-2.5 last:border-0">
               <div>
-                <p className="text-sm font-semibold text-ink">{row.ticker}</p>
+                <p className="text-sm font-semibold text-ink">
+                  {row.displayTicker ?? row.ticker}
+                </p>
                 <p className="max-w-[220px] truncate text-xs text-ink-tertiary">{row.company}</p>
               </div>
               <div className="text-right">
                 <p className={cn('text-sm font-semibold tabular-nums', row.changePercent >= 0 ? 'text-success' : 'text-danger')}>
                   {formatSignedPct(row.changePercent)}
                 </p>
-                <p className="text-xs text-ink-tertiary tabular-nums">{formatCurrency(row.currentPrice)}</p>
+                <p className="text-xs text-ink-tertiary tabular-nums">
+                  {formatCurrency(row.currentPrice, currency)}
+                </p>
               </div>
             </div>
           ))
@@ -265,7 +306,8 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
           <tr key={q.code} className="border-t border-border">
             <td className="py-2.5 font-medium text-ink">{q.label}</td>
             <td className="py-2.5 text-right tabular-nums text-ink">
-              {q.currentPrice != null ? formatCurrency(q.currentPrice) : '—'}
+              {/* Per-quote currency: an Indian book's gold is still quoted in USD. */}
+              {q.currentPrice != null ? formatCurrency(q.currentPrice, q.currency) : '—'}
             </td>
             <ChangeCell value={q.dayChangePercent} />
             <ChangeCell value={q.ytdChangePercent} />
@@ -276,7 +318,15 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
   );
 }
 
-function ClientMoversTable({ rows, loading }: { rows?: ClientMover[]; loading: boolean }) {
+function ClientMoversTable({
+  rows,
+  loading,
+  currency,
+}: {
+  rows?: ClientMover[];
+  loading: boolean;
+  currency: string;
+}) {
   if (loading) {
     return (
       <div className="space-y-2">
@@ -302,7 +352,9 @@ function ClientMoversTable({ rows, loading }: { rows?: ClientMover[]; loading: b
         {rows.map((r) => (
           <tr key={r.clientId} className="border-t border-border">
             <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
-            <td className="py-2.5 text-right tabular-nums text-ink">{formatCurrency(r.marketValue)}</td>
+            <td className="py-2.5 text-right tabular-nums text-ink">
+              {formatCurrency(r.marketValue, currency)}
+            </td>
             <ChangeCell value={r.changePercent} />
           </tr>
         ))}

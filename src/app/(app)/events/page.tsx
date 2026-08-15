@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { TrendingUp, Coins, Split, RefreshCw } from 'lucide-react';
 import { eventsApi } from '@/lib/events.api';
 import { formatDate, cn } from '@/lib/utils';
+import { displayTicker } from '@/lib/market-scope';
+import { useMarket } from '@/components/layout/MarketContext';
 import { PortfolioEvent, PortfolioEventType } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { Badge, Button, DataTable, useToast, type Column } from '@/components/ui';
@@ -26,10 +28,11 @@ const TYPE_FILTERS: Array<{ value: PortfolioEventType | 'ALL'; label: string }> 
 ];
 
 export default function EventCenterPage() {
+  const { market, meta, ready: marketReady } = useMarket();
+
   usePageHeading({
     title: 'Event Center',
-    subtitle:
-      'Upcoming earnings, dividends, and corporate actions across every holding',
+    subtitle: `Upcoming earnings, dividends, and corporate actions across the ${meta.label} book`,
   });
 
   const { toast } = useToast();
@@ -40,17 +43,21 @@ export default function EventCenterPage() {
 
   const load = useCallback(async () => {
     try {
-      setEvents(await eventsApi.forHoldings());
+      setEvents(await eventsApi.forHoldings(market));
     } catch {
       toast({ tone: 'error', title: 'Failed to load the event calendar' });
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, market]);
 
+  // Re-loads on a book switch, and shows the spinner while it does so the table
+  // never displays the previous market's events under the new selector.
   useEffect(() => {
+    if (!marketReady) return;
+    setLoading(true);
     void load();
-  }, [load]);
+  }, [load, marketReady]);
 
   // One Yahoo request per held ticker, so this takes a few seconds: re-fetches
   // the calendar into the DB snapshot, then reloads the page from that snapshot.
@@ -77,9 +84,11 @@ export default function EventCenterPage() {
       key: 'ticker',
       header: 'Symbol',
       accessor: (e) => e.ticker,
+      // 'RELIANCE.NS' reads as 'RELIANCE' — the exchange suffix is plumbing the
+      // desk does not need to see, and the Indian book is entirely suffixed.
       render: (e) => (
         <div>
-          <p className="font-semibold text-ink">{e.ticker}</p>
+          <p className="font-semibold text-ink">{displayTicker(e.ticker)}</p>
           <p className="max-w-[220px] truncate text-xs text-ink-tertiary">{e.company}</p>
         </div>
       ),
@@ -123,11 +132,16 @@ export default function EventCenterPage() {
       header: 'Held By',
       accessor: (e) => e.clientCount,
       align: 'right',
-      render: (e) => (
-        <span className="tabular-nums text-ink-secondary">
-          {e.clientCount} client{e.clientCount === 1 ? '' : 's'}
-        </span>
-      ),
+      // A watchlisted candidate has no holders yet; "0 clients" would read as a
+      // data error, so it is labelled for what it is.
+      render: (e) =>
+        e.watchlistOnly ? (
+          <Badge tone="neutral">Watchlist</Badge>
+        ) : (
+          <span className="tabular-nums text-ink-secondary">
+            {e.clientCount} client{e.clientCount === 1 ? '' : 's'}
+          </span>
+        ),
     },
     {
       key: 'status',
@@ -184,20 +198,24 @@ export default function EventCenterPage() {
           pageSize={10}
           onExport={(rows) =>
             exportToCsv(
-              'event-center.csv',
+              `event-center-${market.toLowerCase()}.csv`,
               [
-                { key: 'ticker', header: 'Symbol', accessor: (e: PortfolioEvent) => e.ticker },
+                { key: 'ticker', header: 'Symbol', accessor: (e: PortfolioEvent) => displayTicker(e.ticker) },
                 { key: 'company', header: 'Company', accessor: (e: PortfolioEvent) => e.company },
                 { key: 'event', header: 'Event', accessor: (e: PortfolioEvent) => e.label || TYPE_META[e.type].label },
                 { key: 'date', header: 'Date', accessor: (e: PortfolioEvent) => e.date },
-                { key: 'clientCount', header: 'Held By (clients)', accessor: (e: PortfolioEvent) => e.clientCount },
+                {
+                  key: 'clientCount',
+                  header: 'Held By (clients)',
+                  accessor: (e: PortfolioEvent) => (e.watchlistOnly ? 'Watchlist' : e.clientCount),
+                },
                 { key: 'status', header: 'Status', accessor: (e: PortfolioEvent) => e.status },
               ],
               rows,
             )
           }
           emptyTitle="No upcoming events"
-          emptyDescription="Nothing in the next ~60 days for tickers currently held across your clients."
+          emptyDescription={`Nothing in the next ~60 days for ${meta.label} names held or watchlisted across your clients.`}
         />
       </div>
     </>
