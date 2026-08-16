@@ -5,7 +5,8 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown } from 'lucide-react';
-import { allNavItems } from '@/lib/navigation';
+import { allNavItems, visibleFor } from '@/lib/navigation';
+import { useSession } from './SessionContext';
 import { cn } from '@/lib/utils';
 
 export function CommandPalette({
@@ -16,14 +17,19 @@ export function CommandPalette({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { role } = useSession();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
 
+  // Same role filter the Sidebar applies — otherwise the palette would offer a
+  // shortcut to a page the user isn't meant to see.
+  const items = useMemo(() => visibleFor(allNavItems, role), [role]);
+
   const results = useMemo(() => {
     const q = query.toLowerCase().trim();
-    if (!q) return allNavItems;
-    return allNavItems.filter((i) => i.label.toLowerCase().includes(q));
-  }, [query]);
+    if (!q) return items;
+    return items.filter((i) => i.label.toLowerCase().includes(q));
+  }, [query, items]);
 
   useEffect(() => {
     if (open) {

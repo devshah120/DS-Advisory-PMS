@@ -3,7 +3,39 @@ import type { Market } from '@/lib/market-scope';
 export type { Market };
 
 // Auth Types
-export type UserRole = 'admin' | 'portfolio_manager' | 'research_analyst' | 'viewer';
+//
+// `super_admin` is the only role that may manage other users. `admin` is the
+// legacy spelling of a full-access staff account, kept so existing rows still
+// render; nothing new is created with it.
+export type UserRole =
+  | 'super_admin'
+  | 'admin'
+  | 'portfolio_manager'
+  | 'research_analyst'
+  | 'viewer';
+
+/** Display names, used wherever a role is shown to a person. */
+export const ROLE_LABELS: Record<UserRole, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Admin',
+  portfolio_manager: 'Portfolio Manager',
+  research_analyst: 'Research Analyst',
+  viewer: 'Viewer',
+};
+
+/**
+ * Roles the Users screen may assign. Mirrors ASSIGNABLE_ROLES on the API —
+ * `super_admin` is provisioned by script only, so it is absent here too.
+ */
+export const ASSIGNABLE_ROLES: UserRole[] = [
+  'portfolio_manager',
+  'research_analyst',
+  'viewer',
+];
+
+/** Only a Super Admin can reach the Users screen or its endpoints. */
+export const isSuperAdmin = (role: UserRole | undefined | null) =>
+  role === 'super_admin';
 
 export interface User {
   id: string;

@@ -29,7 +29,7 @@ import {
   type TwoFactorStatus,
 } from '@/lib/security.api';
 import { TwoFactorSetupModal } from '@/components/settings/TwoFactorSetupModal';
-import type { UserRole } from '@/types';
+import { ROLE_LABELS, type UserRole } from '@/types';
 import {
   Card,
   CardHeader,
@@ -45,12 +45,19 @@ import {
 
 type Section = 'profile' | 'preferences' | 'notifications' | 'security';
 
+/**
+ * `role` is deliberately not part of this form. It used to be an editable
+ * select, which let any signed-in user promote themselves to admin; the API now
+ * rejects `role` on PATCH /users/me outright. The role is displayed beside the
+ * form as a read-only badge, and is changed only by a Super Admin from the
+ * Users screen — so it is held in its own piece of state, outside the
+ * dirty-tracking diff that builds the patch.
+ */
 interface ProfileForm {
   firstName: string;
   lastName: string;
   email: string;
   organization: string;
-  role: UserRole;
 }
 
 const EMPTY_PROFILE: ProfileForm = {
@@ -58,7 +65,6 @@ const EMPTY_PROFILE: ProfileForm = {
   lastName: '',
   email: '',
   organization: '',
-  role: 'portfolio_manager',
 };
 
 const toForm = (p: UserProfile): ProfileForm => ({
@@ -67,7 +73,6 @@ const toForm = (p: UserProfile): ProfileForm => ({
   email: p.email,
   // The API stores "not set" as null; the input needs a string.
   organization: p.organization ?? '',
-  role: p.role,
 });
 
 export default function SettingsPage() {
@@ -79,6 +84,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
 
   const [profile, setProfile] = useState<ProfileForm>(EMPTY_PROFILE);
+  // Read-only: displayed as a badge, never submitted. See ProfileForm.
+  const [role, setRole] = useState<UserRole | null>(null);
   const [prefs, setPrefs] = useState<UserPreferences | null>(null);
   const [notifications, setNotifications] = useState<UserNotifications | null>(null);
 
@@ -117,6 +124,7 @@ export default function SettingsPage() {
       const form = toForm(p);
       setProfile(form);
       setSavedProfile(form);
+      setRole(p.role);
       setPrefs(pr);
       setSavedPrefs(pr);
       setNotifications(n);
@@ -347,17 +355,23 @@ export default function SettingsPage() {
                       error={fieldErrors.organization || undefined}
                       onChange={(e) => setP('organization', e.target.value)}
                     />
-                    <Select
-                      label="Role"
-                      value={profile.role}
-                      error={fieldErrors.role || undefined}
-                      onChange={(e) => setP('role', e.target.value)}
-                    >
-                      <option value="admin">Admin</option>
-                      <option value="portfolio_manager">Portfolio Manager</option>
-                      <option value="research_analyst">Research Analyst</option>
-                      <option value="viewer">Viewer</option>
-                    </Select>
+                    {/* Read-only. Your role determines what you can access, so
+                        it is granted by a Super Admin from the Users screen —
+                        it was never something an account should set on itself. */}
+                    <div>
+                      <label className="mb-1.5 block text-[13px] font-medium text-ink-secondary">
+                        Role
+                      </label>
+                      <div className="flex h-11 items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3">
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-ink-tertiary" />
+                        <span className="text-[14px] text-ink">
+                          {role ? ROLE_LABELS[role] : '—'}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-[12px] text-ink-tertiary">
+                        Only a Super Admin can change this.
+                      </p>
+                    </div>
                   </div>
                 </Card>
               )}

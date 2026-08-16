@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { clientsApi } from '@/lib/clients.api';
-import { usersApi, type UserProfile } from '@/lib/users.api';
+import { type UserProfile } from '@/lib/users.api';
+import { useSession } from './SessionContext';
 import { cn } from '@/lib/utils';
 import { useMarket } from './MarketContext';
 import { ALL_MARKETS, MARKET_META } from '@/lib/market-scope';
@@ -70,22 +71,10 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    usersApi
-      .getProfile()
-      .then((p) => {
-        if (active) setProfile(p);
-      })
-      // The avatar falls back to a neutral placeholder, so a failure here isn't
-      // worth a toast — it would fire on every page with the header mounted.
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Shared with the Sidebar via SessionProvider, so the profile is fetched once
+  // for the shell rather than once per consumer. A failed load leaves this null
+  // and the avatar falls back to a neutral placeholder.
+  const { profile } = useSession();
 
   // Re-fetched whenever the book changes: the client switcher must only offer
   // clients from the selected market, otherwise picking a US client while the

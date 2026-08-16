@@ -15,12 +15,55 @@ export interface UserProfile {
   updatedAt: string;
 }
 
+/**
+ * `role` is absent on purpose: the API rejects it on PATCH /users/me, because
+ * changing your own role is privilege escalation. Roles are assigned from the
+ * Users screen (Super Admin only) via `adminUpdateUser`.
+ */
 export type UpdateProfileInput = Partial<{
   firstName: string;
   lastName: string;
   email: string;
   organization: string;
+}>;
+
+/** A staff (or client-portal) login as listed on the Users admin screen. */
+export interface StaffUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  organization: string | null;
   role: UserRole;
+  roleLabel: string;
+  active: boolean;
+  avatar: string | null;
+  /** Created from a client record; shown read-only here. */
+  isClientLogin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateUserInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  organization?: string;
+  active?: boolean;
+}
+
+/** All optional — the Users screen sends only what changed. */
+export type AdminUpdateUserInput = Partial<{
+  firstName: string;
+  lastName: string;
+  email: string;
+  /** A reset, not a change: no current password is required. */
+  password: string;
+  role: UserRole;
+  organization: string;
+  active: boolean;
 }>;
 
 export interface UserPreferences {
@@ -82,6 +125,33 @@ export const usersApi = {
     const res = await apiClient
       .getClient()
       .post<{ message: string }>('/users/me/password', input);
+    return res.data;
+  },
+
+  // --- Staff management. Every call below 403s unless the caller is a Super
+  // Admin; the UI hides the screen entirely for everyone else.
+
+  async listUsers() {
+    const res = await apiClient.getClient().get<StaffUser[]>('/users');
+    return res.data;
+  },
+
+  async createUser(input: CreateUserInput) {
+    const res = await apiClient.getClient().post<StaffUser>('/users', input);
+    return res.data;
+  },
+
+  async adminUpdateUser(id: string, input: AdminUpdateUserInput) {
+    const res = await apiClient
+      .getClient()
+      .patch<StaffUser>(`/users/${id}`, input);
+    return res.data;
+  },
+
+  async deleteUser(id: string) {
+    const res = await apiClient
+      .getClient()
+      .delete<{ message: string }>(`/users/${id}`);
     return res.data;
   },
 };

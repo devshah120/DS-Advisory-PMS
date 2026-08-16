@@ -11,7 +11,14 @@ import {
   LogOut,
   ChevronRight,
 } from 'lucide-react';
-import { navSections, settingsItem, allNavItems, NavItem } from '@/lib/navigation';
+import {
+  navSectionsFor,
+  settingsItem,
+  allNavItems,
+  visibleFor,
+  NavItem,
+} from '@/lib/navigation';
+import { useSession } from './SessionContext';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
@@ -22,16 +29,24 @@ interface SidebarProps {
 
 export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const { role } = useSession();
   const [query, setQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
 
   const isActive = (href: string) => pathname === href;
 
+  // Role-gated items (currently just Users) are dropped for everyone else. The
+  // nav search is filtered by the same rule, so a hidden page can't be reached
+  // by typing its name either.
+  const sections = useMemo(() => navSectionsFor(role), [role]);
+
   const filtered = useMemo(() => {
     if (!query.trim()) return null;
     const q = query.toLowerCase();
-    return allNavItems.filter((i) => i.label.toLowerCase().includes(q));
-  }, [query]);
+    return visibleFor(allNavItems, role).filter((i) =>
+      i.label.toLowerCase().includes(q)
+    );
+  }, [query, role]);
 
   return (
     <motion.aside
@@ -104,7 +119,7 @@ export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps)
           </SidebarGroup>
         ) : (
           <>
-            {navSections.map((section) => (
+            {sections.map((section) => (
               <SidebarGroup key={section.title} collapsed={collapsed} title={section.title}>
                 {section.items.map((item) => (
                   <SidebarLink

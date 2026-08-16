@@ -9,6 +9,7 @@ import Header from './Header';
 import { CommandPalette } from './CommandPalette';
 import { PageHeaderProvider, usePageHeader } from './PageHeaderContext';
 import { MarketProvider } from './MarketContext';
+import { SessionProvider } from './SessionContext';
 
 /**
  * The persistent application chrome: sidebar, header, command palette.
@@ -28,12 +29,16 @@ export default function AppShell({
   // MarketProvider sits outside PageHeaderProvider so the selected book is in
   // scope for the Header (which renders the selector) and for every page at
   // once — the selection has to outlive navigation between them.
+  // SessionProvider is outermost: the signed-in user's role decides which nav
+  // items the Sidebar renders, and both it and the Header read the same profile.
   return (
-    <MarketProvider>
-      <PageHeaderProvider>
-        <AppShellInner requireAuth={requireAuth}>{children}</AppShellInner>
-      </PageHeaderProvider>
-    </MarketProvider>
+    <SessionProvider>
+      <MarketProvider>
+        <PageHeaderProvider>
+          <AppShellInner requireAuth={requireAuth}>{children}</AppShellInner>
+        </PageHeaderProvider>
+      </MarketProvider>
+    </SessionProvider>
   );
 }
 
