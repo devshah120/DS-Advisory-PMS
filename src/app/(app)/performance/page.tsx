@@ -38,6 +38,7 @@ import {
   useToast,
 } from '@/components/ui';
 import { PeriodPerformance } from '@/components/performance/PeriodPerformance';
+import { downloadPerformanceWorkbook } from '@/lib/performanceExport';
 
 /** Rate formatting. The engine speaks in fractions (0.12); people read percent. */
 const pct = (v: number, dp = 2) => `${(v * 100).toFixed(dp)}%`;
@@ -47,6 +48,7 @@ const signedPct = (v: number, dp = 2) =>
 export default function PerformancePage() {
   const { toast } = useToast();
   const { market, ready: marketReady } = useMarket();
+  const currency = useCurrency();
 
   const [clients, setClients] = useState<Client[] | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
@@ -145,7 +147,7 @@ export default function PerformancePage() {
           </Select>
         )}
         {/* Export ships the since-inception sheet, so it stays on that path.
-            The period sheet's export is a separate concern — a CSV of one
+            The period sheet's export is a separate concern — a sheet of one
             window labelled as if it were the whole book would be worse than
             no button at all. */}
         {!usePeriodSheet && (
@@ -155,7 +157,18 @@ export default function PerformancePage() {
               size="md"
               leftIcon={<Download className="h-4 w-4" />}
               disabled={!result || result.data.status !== 'ok'}
-              onClick={() => result && exportSheet(result)}
+              onClick={async () => {
+                if (!result) return;
+                try {
+                  await downloadPerformanceWorkbook(
+                    client?.name ?? 'Client',
+                    result,
+                    currency,
+                  );
+                } catch {
+                  toast({ tone: 'error', title: 'Could not build the report' });
+                }
+              }}
             >
               Export
             </Button>
@@ -948,53 +961,6 @@ function Warning({ text }: { text: string }) {
       <p className="text-[13px] leading-relaxed text-amber-900">{text}</p>
     </div>
   );
-}
-
-function exportSheet(result: PerformanceResponse) {
-  const { data, meta } = result;
-  if (data.status !== 'ok') return;
-
-  const rows: Array<[string, string | number]> = [
-    ['Method', meta.method],
-    ['Cash flow basis', meta.flowBasis],
-    ['As of', new Date(meta.asOf).toISOString().slice(0, 10)],
-    ['Period (days)', data.periodDays],
-    ['', ''],
-    ['Portfolio value', data.portfolioValue],
-    ['Holdings value', data.holdingsValue],
-    ['Cash balance', data.cashBalance],
-    ['Invested capital', data.investedCapital],
-    ['Realized proceeds', data.realizedProceeds],
-    ['Net deposits', data.netDeposits],
-    ['Net withdrawals', data.netWithdrawals],
-    ['Realized gain', data.realizedGain],
-    ['Unrealized gain', data.unrealizedGain],
-    ['Total gain', data.totalGain],
-    ['Dividend income', data.dividendIncome],
-    ['Fees', data.fees],
-    ['', ''],
-    ['XIRR (annualized)', data.xirr ?? 'n/a'],
-    ['Interim return', data.interimReturn ?? 'n/a'],
-    ['Absolute return', data.absoluteReturn ?? 'n/a'],
-    ['Annualized return', data.annualizedReturn ?? 'n/a'],
-    ['Benchmark', data.benchmark?.code ?? 'n/a'],
-    ['Benchmark XIRR', data.benchmark?.xirr ?? 'n/a'],
-    ['Alpha (annualized)', data.alpha ?? 'n/a'],
-    ['Alpha (interim)', data.alphaInterim ?? 'n/a'],
-    ['Cash drag', data.cashDrag ?? 'n/a'],
-    ['Portfolio turnover', data.portfolioTurnover ?? 'n/a'],
-  ];
-
-  const csv = rows
-    .map(([k, v]) => `"${String(k).replace(/"/g, '""')}","${String(v).replace(/"/g, '""')}"`)
-    .join('\n');
-
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `performance-${new Date(meta.asOf).toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 function SheetSkeleton() {
