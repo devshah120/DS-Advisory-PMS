@@ -11,6 +11,7 @@ import {
   Settings,
   Gauge,
   Newspaper,
+  CreditCard,
   type LucideIcon,
 } from 'lucide-react';
 import { isSuperAdmin, type UserRole } from '@/types';
@@ -48,6 +49,10 @@ export const navSections: NavSection[] = [
       // Route stays /users — renaming the path would break bookmarks and the
       // API's own /users endpoints for no gain. Only the label changed.
       { label: 'Portfolio Managers', href: '/users', icon: UserCog, visible: isSuperAdmin },
+      // What managers pay the firm for their seat — trial length, plan prices
+      // and the Razorpay keys. Sits next to Portfolio Managers because it
+      // governs those same logins. Super Admin only, matching the API.
+      { label: 'Subscription', href: '/subscription', icon: CreditCard, visible: isSuperAdmin },
     ],
   },
   {
