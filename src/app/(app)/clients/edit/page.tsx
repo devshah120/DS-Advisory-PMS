@@ -56,6 +56,10 @@ function EditClientPageInner() {
           // from its household.
           familyId: client.familyId ?? '',
           newFamilyName: '',
+          // Prefilled for the same reason as familyId: a Super Admin saving an
+          // unrelated edit must not silently unassign the mandate from its
+          // manager. Ignored by the API for non-admins.
+          ownerId: client.ownerId ?? '',
           notes: client.notes ?? '',
         });
       } catch {

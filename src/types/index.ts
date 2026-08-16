@@ -93,9 +93,31 @@ export interface Client {
   familyId?: string | null;
   /** Joined by the API so the list can label a mandate without a second fetch. */
   family?: { id: string; name: string } | null;
+  /**
+   * The manager whose book this mandate sits in — the firm's privacy boundary.
+   *
+   * A Portfolio Manager only ever receives their own clients, so this is always
+   * their own id for them; it is meaningful mainly to a Super Admin, who sees
+   * every book and can reassign a mandate between managers. Null means the
+   * mandate is UNASSIGNED and visible to Super Admins only.
+   */
+  ownerId?: string | null;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * A staff member who can hold a book — an option in the "Assigned Manager"
+ * selector. Served by GET /users/assignable (Super Admin only).
+ */
+export interface AssignableManager {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  roleLabel: string;
+  organization?: string | null;
 }
 
 // Family (household) Types

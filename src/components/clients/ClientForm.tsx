@@ -16,7 +16,9 @@ import {
 } from 'lucide-react';
 import { CreateClientInput, parseApiError } from '@/lib/clients.api';
 import { familiesApi } from '@/lib/families.api';
-import { Family, RiskProfile } from '@/types';
+import { usersApi } from '@/lib/users.api';
+import { useSession } from '@/components/layout/SessionContext';
+import { AssignableManager, Family, RiskProfile } from '@/types';
 import { useMarket } from '@/components/layout/MarketContext';
 import { DEFAULT_BENCHMARK, MARKET_BENCHMARKS } from '@/lib/market-scope';
 import { Card, CardHeader, Input, Select, Textarea, Button, Badge, useToast } from '@/components/ui';
@@ -51,6 +53,14 @@ export interface ClientFormValues {
   familyId: string;
   /** Only read when `familyId` is NEW_FAMILY. */
   newFamilyName: string;
+  /**
+   * The manager this mandate is assigned to. Super Admin only — a Portfolio
+   * Manager always owns what they create and never sees this field, and the
+   * API ignores the value for them regardless of what is posted.
+   *
+   * Empty means UNASSIGNED, which is visible to Super Admins only.
+   */
+  ownerId: string;
   notes: string;
 }
 
@@ -68,6 +78,7 @@ export const emptyClientForm: ClientFormValues = {
   cashBalance: '',
   familyId: '',
   newFamilyName: '',
+  ownerId: '',
   notes: '',
 };
 
@@ -93,6 +104,24 @@ export default function ClientForm({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [families, setFamilies] = useState<Family[]>([]);
+  // Only a Super Admin may assign a mandate to someone else, so the options are
+  // fetched only for them — the endpoint 403s for anyone else by design.
+  const { isSuperAdmin, ready: sessionReady } = useSession();
+  const [managers, setManagers] = useState<AssignableManager[]>([]);
+
+  useEffect(() => {
+    if (!sessionReady || !isSuperAdmin) return;
+    let mounted = true;
+    usersApi
+      .getAssignableManagers()
+      .then((rows) => mounted && setManagers(rows))
+      // A failed load leaves the selector with just "Unassigned". The mandate
+      // can still be created and reassigned later from the edit form.
+      .catch(() => mounted && setManagers([]));
+    return () => {
+      mounted = false;
+    };
+  }, [isSuperAdmin, sessionReady]);
 
   useEffect(() => {
     if (!marketReady) return;
@@ -202,6 +231,10 @@ export default function ClientForm({
       // Always sent, including as null, so clearing the field detaches the
       // client from its household rather than leaving the old link in place.
       familyId,
+      // Sent only by a Super Admin: for anyone else the API resolves the owner
+      // from the session and ignores this field, so posting it would be noise
+      // that reads as though a manager could choose.
+      ...(isSuperAdmin ? { ownerId: form.ownerId || null } : {}),
       name: form.name.trim(),
       broker: form.broker.trim(),
       accountNumber: form.accountNumber.trim(),
@@ -411,6 +444,28 @@ export default function ClientForm({
               error={errors.newFamilyName}
               helper={`Created in the ${meta.label} book when you save, with this client as its first member`}
             />
+          )}
+          {/*
+            Super Admin only. A Portfolio Manager always owns what they create,
+            so showing them a selector they cannot act on would imply the
+            mandate could go elsewhere — it cannot, and the API enforces that.
+          */}
+          {isSuperAdmin && (
+            <Select
+              label="Assigned Manager"
+              value={form.ownerId}
+              onChange={(e) => set('ownerId', e.target.value)}
+              error={errors.ownerId}
+              helper="Which manager's book this mandate belongs to. Only they (and Super Admins) can see it. Leave unassigned to keep it visible to Super Admins only."
+            >
+              <option value="">Unassigned — Super Admins only</option>
+              {managers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} · {m.roleLabel}
+                  {m.organization ? ` · ${m.organization}` : ''}
+                </option>
+              ))}
+            </Select>
           )}
         </div>
         <div className="mt-5">

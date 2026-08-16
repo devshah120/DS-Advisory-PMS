@@ -1,5 +1,5 @@
 import { apiClient } from './api';
-import { UserRole } from '@/types';
+import { AssignableManager, UserRole } from '@/types';
 
 /** Shape returned by GET/PATCH /users/me. Never carries a password. */
 export interface UserProfile {
@@ -85,6 +85,20 @@ export interface UserNotifications {
 export const usersApi = {
   async getProfile() {
     const res = await apiClient.getClient().get<UserProfile>('/users/me');
+    return res.data;
+  },
+
+  /**
+   * Staff who can hold a book — the "Assigned Manager" options.
+   *
+   * Super Admin only (the API enforces it), so callers must gate the request on
+   * the role rather than relying on an empty list: a Portfolio Manager hitting
+   * this gets a 403, not `[]`.
+   */
+  async getAssignableManagers() {
+    const res = await apiClient
+      .getClient()
+      .get<AssignableManager[]>('/users/assignable');
     return res.data;
   },
 

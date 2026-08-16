@@ -43,6 +43,15 @@ export interface CreateClientInput {
    * rather than summing two currencies into one total.
    */
   familyId?: string | null;
+  /**
+   * The manager this mandate is assigned to — the "Assigned Manager" field.
+   *
+   * Honoured only for a Super Admin. A Portfolio Manager always owns what they
+   * create and cannot reassign, so the API resolves the owner from the session
+   * and ignores this value for them; sending it is harmless but pointless.
+   * Null means UNASSIGNED (Super-Admin-visible only).
+   */
+  ownerId?: string | null;
   status?: ClientStatus;
   cashBalance?: number;
   portfolioValue?: number;
