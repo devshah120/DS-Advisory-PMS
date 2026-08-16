@@ -310,6 +310,29 @@ export interface PortfolioEvent {
   market: Market;
   /** Tracked but not yet owned: on the watchlist with no client holding it. */
   watchlistOnly: boolean;
+  /**
+   * Per-share ANNUAL dividend rate — what the upstream reports, not the amount
+   * declared for this specific ex-date. Null for earnings and splits.
+   */
+  dividendRate: number | null;
+  /** Payments per year, when inferable. Gates the per-payment estimate. */
+  payoutsPerYear: number | null;
+  /** Per-client breakdown behind clientCount, largest holder first. */
+  holders: EventHolder[];
+  totalQuantity: number;
+  totalAnnualAmount: number | null;
+  totalEstimatedAmount: number | null;
+}
+
+/** One client's exposure to an event — a row in the Held By hover. */
+export interface EventHolder {
+  clientId: string;
+  clientName: string;
+  quantity: number;
+  /** `quantity x dividendRate`, this client's annual income from the name. */
+  annualAmount: number | null;
+  /** The single payment this event represents. Null without a known frequency. */
+  estimatedAmount: number | null;
 }
 
 // Fundamentals Engine Types
