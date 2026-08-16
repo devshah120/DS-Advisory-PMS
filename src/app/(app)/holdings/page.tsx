@@ -37,7 +37,6 @@ import {
 import { Holding, Client, Family, FamilyAggregate, FamilyPosition } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
-import { displayTicker } from '@/lib/market-scope';
 import {
   Card,
   Tabs,
@@ -185,9 +184,6 @@ export default function HoldingsPage() {
   // Indian portfolio renders in rupees with lakh/crore grouping throughout.
   const { market, meta, ready: marketReady } = useMarket();
   const currency = meta.currency;
-  // The Indian book leads with company names rather than tickers — see the
-  // symbol column and the "By Company" tab below.
-  const isIndia = market === 'INDIA';
   const [holdings, setHoldings] = useState<HoldingRow[]>([]);
   /**
    * The full client roster. /holdings alone cannot answer "who does NOT own
@@ -885,31 +881,17 @@ export default function HoldingsPage() {
   const symbolColumns: Column<SymbolRow>[] = [
     {
       key: 'symbol',
-      // Indian holdings are identified by company name, so the name is the
-      // headline and the ticker becomes the subtitle — the reverse of the US
-      // book, where the symbol is how a position is named and searched.
-      header: isIndia ? 'Company' : 'Symbol',
-      // Sorting follows whichever line is the headline, so clicking the header
-      // orders by the text the reader is actually scanning down.
-      accessor: (r) => (isIndia ? (r.company ?? '') : r.symbol),
+      header: 'Symbol',
+      accessor: (r) => r.symbol,
       render: (r) => (
         <div className="flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-2xs font-bold text-ink-secondary">
             {r.symbol.slice(0, 4)}
           </span>
-          {isIndia ? (
-            <div>
-              <p className="max-w-[220px] truncate font-semibold text-ink group-hover:text-brand">
-                {r.company || displayTicker(r.symbol)}
-              </p>
-              <p className="text-xs text-ink-tertiary">{displayTicker(r.symbol)}</p>
-            </div>
-          ) : (
-            <div>
-              <p className="font-semibold text-ink group-hover:text-brand">{r.symbol}</p>
-              <p className="max-w-[180px] truncate text-xs text-ink-tertiary">{r.company}</p>
-            </div>
-          )}
+          <div>
+            <p className="font-semibold text-ink group-hover:text-brand">{r.symbol}</p>
+            <p className="max-w-[180px] truncate text-xs text-ink-tertiary">{r.company}</p>
+          </div>
           <ChevronRight className="h-4 w-4 text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
       ),
@@ -1536,7 +1518,7 @@ export default function HoldingsPage() {
         <div className="flex items-center justify-between">
           <Tabs
             tabs={[
-              { value: 'symbols', label: isIndia ? 'By Company' : 'By Symbol', count: symbolRows.length },
+              { value: 'symbols', label: 'By Symbol', count: symbolRows.length },
               { value: 'clients', label: 'By Client', count: clientRows.length },
               { value: 'sectors', label: 'By Sector', count: sectorRows.length },
               { value: 'all', label: 'All Positions', count: holdings.length },
@@ -1553,12 +1535,7 @@ export default function HoldingsPage() {
             data={symbolRows}
             loading={loading}
             rowKey={(r) => r.symbol}
-            // The symbol column's accessor narrows to the headline field, so
-            // spell the haystack out here — a manager must still be able to
-            // find a holding by ticker on the Indian book, where the ticker is
-            // no longer the sorted column.
-            searchKeys={(r) => `${r.symbol} ${displayTicker(r.symbol)} ${r.company ?? ''} ${r.sector ?? ''}`}
-            searchPlaceholder={isIndia ? 'Search companies or symbols…' : 'Search symbols or companies…'}
+            searchPlaceholder="Search symbols or companies…"
             onRowClick={(r) => setActiveSymbol(r)}
             onExport={(rows) => {
               exportToCsv('holdings-by-symbol.csv', symbolColumns, rows);

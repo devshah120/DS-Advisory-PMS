@@ -35,10 +35,9 @@ import {
   EmptyState,
   Select,
   Skeleton,
-  Tabs,
   useToast,
 } from '@/components/ui';
-import { HistoricalPanel } from '@/components/performance/HistoricalPanel';
+import { PeriodPerformance } from '@/components/performance/PeriodPerformance';
 
 /** Rate formatting. The engine speaks in fractions (0.12); people read percent. */
 const pct = (v: number, dp = 2) => `${(v * 100).toFixed(dp)}%`;
@@ -54,7 +53,15 @@ export default function PerformancePage() {
   const [result, setResult] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [view, setView] = useState<'current' | 'historical'>('current');
+
+  /**
+   * The Indian book is on the rebuilt period sheet: one view, one period
+   * selector (Q2 FY27 / FYTD / CYTD / …), one money-weighted headline per
+   * window. The US book keeps the original since-inception sheet until it is
+   * migrated, so this is a fork in the VIEW only — both books share the same
+   * engine, the same XIRR and the same benchmark construction underneath.
+   */
+  const usePeriodSheet = market === 'INDIA';
 
   useEffect(() => {
     if (!marketReady) return;
@@ -99,9 +106,16 @@ export default function PerformancePage() {
 
   useEffect(() => {
     if (!clientId) return;
+    // The period sheet fetches its own data per selected window, so the
+    // since-inception call is skipped entirely on that path rather than being
+    // made and discarded.
+    if (usePeriodSheet) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     load(clientId as string);
-  }, [clientId, load]);
+  }, [clientId, load, usePeriodSheet]);
 
   const client = useMemo(
     () => clients?.find((c) => c.id === clientId) ?? null,
@@ -109,10 +123,12 @@ export default function PerformancePage() {
   );
 
   usePageHeading({
-    title: "Performance",
-    subtitle: result
-      ? result.meta.method
-      : 'Money-weighted returns, benchmark comparison and attribution',
+    title: 'Performance',
+    subtitle: usePeriodSheet
+      ? 'Transactional XIRR, measured over the period you select'
+      : result
+        ? result.meta.method
+        : 'Money-weighted returns, benchmark comparison and attribution',
     actions: (
       <>
         {clients && clients.length > 0 && (
@@ -128,56 +144,56 @@ export default function PerformancePage() {
             ))}
           </Select>
         )}
-        <Button
-          variant="outline"
-          size="md"
-          leftIcon={<Download className="h-4 w-4" />}
-          disabled={!result || result.data.status !== 'ok'}
-          onClick={() => result && exportSheet(result)}
-        >
-          Export
-        </Button>
-        <Button
-          size="md"
-          leftIcon={
-            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-          }
-          disabled={!clientId || refreshing}
-          onClick={() => {
-            setRefreshing(true);
-            if (clientId) load(clientId);
-          }}
-        >
-          Refresh
-        </Button>
+        {/* Export ships the since-inception sheet, so it stays on that path.
+            The period sheet's export is a separate concern — a CSV of one
+            window labelled as if it were the whole book would be worse than
+            no button at all. */}
+        {!usePeriodSheet && (
+          <>
+            <Button
+              variant="outline"
+              size="md"
+              leftIcon={<Download className="h-4 w-4" />}
+              disabled={!result || result.data.status !== 'ok'}
+              onClick={() => result && exportSheet(result)}
+            >
+              Export
+            </Button>
+            <Button
+              size="md"
+              leftIcon={<RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />}
+              disabled={!clientId || refreshing}
+              onClick={() => {
+                setRefreshing(true);
+                if (clientId) load(clientId);
+              }}
+            >
+              Refresh
+            </Button>
+          </>
+        )}
       </>
     ),
   });
 
+  /**
+   * No tabs. The old page split "Current (since inception)" from "Historical
+   * (as of a date)", which forced the reader to know which of two engines
+   * answered their question before they could ask it — and the two reported
+   * different numbers for the same book. Since inception is now simply one
+   * entry in the period dropdown, because that is all it ever was.
+   */
   return (
     <>
-      {clients && clients.length > 0 && (
-        <div className="mb-6">
-          <Tabs
-            value={view}
-            onChange={(v) => setView(v as 'current' | 'historical')}
-            tabs={[
-              { value: 'current', label: 'Current (since inception)' },
-              { value: 'historical', label: 'Historical (as of a date)' },
-            ]}
-          />
-        </div>
-      )}
-
       {loading ? (
         <SheetSkeleton />
       ) : !clients?.length ? (
         <EmptyState
           title="No clients yet"
-          description="Add a client, choose their accounting method, and their performance sheet appears here."
+          description="Add a client and their performance sheet appears here."
         />
-      ) : view === 'historical' ? (
-        clientId && <HistoricalPanel clientId={clientId} />
+      ) : usePeriodSheet ? (
+        clientId && <PeriodPerformance key={clientId} clientId={clientId} />
       ) : !result ? (
         <EmptyState
           title="Nothing to show"
