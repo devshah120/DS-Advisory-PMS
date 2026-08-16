@@ -10,7 +10,7 @@ import {
   type AdminUpdateUserInput,
 } from '@/lib/users.api';
 import { parseApiError } from '@/lib/clients.api';
-import { ASSIGNABLE_ROLES, ROLE_LABELS, isSuperAdmin, type UserRole } from '@/types';
+import { ROLE_LABELS, isSuperAdmin, type UserRole } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import {
   Card,
@@ -19,7 +19,6 @@ import {
   DataTable,
   Modal,
   Input,
-  Select,
   EmptyState,
   Skeleton,
   useToast,
@@ -72,11 +71,11 @@ export default function UsersPage() {
   }, []);
 
   usePageHeading({
-    title: 'Users',
-    subtitle: 'Staff logins and their permissions',
+    title: 'Portfolio Managers',
+    subtitle: 'Manager logins and the books they run',
     actions: allowed ? (
       <Button leftIcon={<Plus className="h-4 w-4" />} onClick={openCreate}>
-        Add User
+        Add Portfolio Manager
       </Button>
     ) : null,
   });
@@ -96,7 +95,20 @@ export default function UsersPage() {
       }
 
       setAllowed(true);
-      setUsers(await usersApi.listUsers());
+      // This screen lists the firm's PORTFOLIO MANAGERS. The API returns every
+      // staff row, so the two kinds that are not managers are dropped here:
+      //
+      //   · VIEWER — client-portal logins. They belong to their Client record
+      //     and are created and deleted with it (see ClientsService), so they
+      //     were only ever read-only rows here.
+      //   · SUPER_ADMIN / ADMIN — administrators, not a book of business. The
+      //     tier is provisioned by script and cannot be created or edited from
+      //     this screen anyway.
+      //
+      // Filtered at load rather than in `columns` so every consumer of `users`
+      // — the table, the search, the row count — agrees on one list.
+      const staff = await usersApi.listUsers();
+      setUsers(staff.filter((u) => u.role === 'portfolio_manager' || u.role === 'research_analyst'));
     } catch (err) {
       toast({ tone: 'error', title: parseApiError(err).message });
       setAllowed(false);
@@ -166,7 +178,7 @@ export default function UsersPage() {
           lastName: form.lastName.trim(),
           email: form.email.trim().toLowerCase(),
           password: form.password,
-          role: form.role,
+          // `role` is not sent: the API creates a Portfolio Manager either way.
           active: form.active,
           ...(form.organization.trim() && { organization: form.organization.trim() }),
         };
@@ -188,7 +200,9 @@ export default function UsersPage() {
           patch.email = form.email.trim().toLowerCase();
         if (form.organization.trim() !== (editing.organization ?? ''))
           patch.organization = form.organization.trim();
-        if (form.role !== editing.role) patch.role = form.role;
+        // `role` is deliberately never patched: it is no longer editable here,
+        // and sending it would let an edit demote the Super Admin or flip a
+        // client-portal login into staff via a stale form value.
         if (form.active !== editing.active) patch.active = form.active;
         if (form.password) patch.password = form.password;
 
@@ -323,7 +337,7 @@ export default function UsersPage() {
         <EmptyState
           icon={<ShieldCheck className="h-6 w-6" />}
           title="Super Admin access required"
-          description="Only a Super Admin can manage staff logins and roles."
+          description="Only a Super Admin can manage portfolio manager logins."
           action={
             <Button variant="secondary" onClick={() => router.push('/dashboard')}>
               Back to Dashboard
@@ -343,9 +357,9 @@ export default function UsersPage() {
           columns={columns}
           data={users}
           rowKey={(u) => u.id}
-          searchPlaceholder="Search users…"
+          searchPlaceholder="Search portfolio managers…"
           searchKeys={(u) => `${u.firstName} ${u.lastName} ${u.email} ${u.roleLabel}`}
-          emptyTitle="No users yet"
+          emptyTitle="No portfolio managers yet"
           emptyDescription="Add a Portfolio Manager to get started."
         />
       </Card>
@@ -354,11 +368,11 @@ export default function UsersPage() {
         isOpen={formOpen}
         onClose={closeForm}
         size="xl"
-        title={creating ? 'Add user' : 'Edit user'}
+        title={creating ? 'Add Portfolio Manager' : 'Edit account'}
         description={
           creating
-            ? 'Create a login for a member of the team.'
-            : 'Update this account’s details, role, or access.'
+            ? 'Create a manager login. They start with no clients — assign mandates to them from the client form.'
+            : 'Update this account’s details or access.'
         }
         footer={
           <div className="flex justify-end gap-3">
@@ -366,7 +380,7 @@ export default function UsersPage() {
               Cancel
             </Button>
             <Button onClick={handleSave} loading={saving}>
-              {creating ? 'Create user' : 'Save changes'}
+              {creating ? 'Create Portfolio Manager' : 'Save changes'}
             </Button>
           </div>
         }
@@ -410,30 +424,28 @@ export default function UsersPage() {
             }
             onChange={(e) => setF('password', e.target.value)}
           />
-          <Select
+          {/*
+            Role is fixed, not chosen. This screen creates Portfolio Managers and
+            nothing else, so a selector would only offer ways to get it wrong —
+            `form.role` stays 'portfolio_manager' from EMPTY_FORM and is sent as
+            such. Read-only rather than hidden so an EDIT still shows the truth:
+            the list also contains client-portal logins (Viewer) and the Super
+            Admin, and a blank space there would read as "no role".
+
+            Super Admin remains unassignable from any UI — the API's
+            ASSIGNABLE_ROLES check rejects it regardless of what is posted.
+          */}
+          <Input
             label="Role"
-            value={form.role}
-            error={formErrors.role || undefined}
+            value={editing ? editing.roleLabel : ROLE_LABELS.portfolio_manager}
+            readOnly
+            disabled
             helper={
-              form.role === 'portfolio_manager'
-                ? 'Full access to clients, transactions, and reporting.'
-                : undefined
+              editing
+                ? 'A role cannot be changed here.'
+                : 'Full access to their own clients, transactions, and reporting.'
             }
-            onChange={(e) => setF('role', e.target.value as UserRole)}
-          >
-            {/* Super Admin is absent by design: that tier is provisioned by
-                script, so it can never be granted from a hijacked session. An
-                existing Super Admin being edited keeps their role as an option
-                so the select still reflects reality. */}
-            {editing && !ASSIGNABLE_ROLES.includes(editing.role) && (
-              <option value={editing.role}>{ROLE_LABELS[editing.role]}</option>
-            )}
-            {ASSIGNABLE_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {ROLE_LABELS[r]}
-              </option>
-            ))}
-          </Select>
+          />
 
           <div className="md:col-span-2">
             <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border border-border p-3.5 transition-colors hover:bg-surface-2">

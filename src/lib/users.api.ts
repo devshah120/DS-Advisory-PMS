@@ -49,7 +49,12 @@ export interface CreateUserInput {
   lastName: string;
   email: string;
   password: string;
-  role: UserRole;
+  /**
+   * Optional and effectively ignored: POST /users creates Portfolio Managers
+   * only, and the API fixes the role server-side regardless of what is sent.
+   * Kept on the type so an older caller still passing it type-checks.
+   */
+  role?: UserRole;
   organization?: string;
   active?: boolean;
 }

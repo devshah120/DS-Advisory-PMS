@@ -45,7 +45,9 @@ export const navSections: NavSection[] = [
     items: [
       { label: 'Clients', href: '/clients', icon: Users },
       { label: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
-      { label: 'Users', href: '/users', icon: UserCog, visible: isSuperAdmin },
+      // Route stays /users — renaming the path would break bookmarks and the
+      // API's own /users endpoints for no gain. Only the label changed.
+      { label: 'Portfolio Managers', href: '/users', icon: UserCog, visible: isSuperAdmin },
     ],
   },
   {

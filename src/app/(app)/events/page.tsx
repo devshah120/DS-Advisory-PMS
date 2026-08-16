@@ -415,7 +415,7 @@ export default function EventCenterPage() {
             onClick={handleRefresh}
             leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh from Yahoo'}
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
         </div>
 

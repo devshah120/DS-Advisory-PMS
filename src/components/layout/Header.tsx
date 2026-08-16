@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -19,13 +19,11 @@ import {
   LogOut,
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
-import { clientsApi } from '@/lib/clients.api';
 import { type UserProfile } from '@/lib/users.api';
 import { useSession } from './SessionContext';
 import { cn } from '@/lib/utils';
 import { useMarket } from './MarketContext';
 import { ALL_MARKETS, MARKET_META } from '@/lib/market-scope';
-import type { Client } from '@/types';
 
 interface HeaderProps {
   onOpenCommand: () => void;
@@ -39,6 +37,8 @@ const crumbLabels: Record<string, string> = {
   add: 'New',
   symbols: 'Symbols',
   auth: 'Account',
+  // The route is still /users; only what it is called changed.
+  users: 'Portfolio Managers',
 };
 
 /**
@@ -67,42 +67,12 @@ const notifications = [
 export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { market, meta, setMarket, ready: marketReady } = useMarket();
-  const [clients, setClients] = useState<Client[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const { market, meta, setMarket } = useMarket();
   const [notifOpen, setNotifOpen] = useState(false);
   // Shared with the Sidebar via SessionProvider, so the profile is fetched once
   // for the shell rather than once per consumer. A failed load leaves this null
   // and the avatar falls back to a neutral placeholder.
   const { profile } = useSession();
-
-  // Re-fetched whenever the book changes: the client switcher must only offer
-  // clients from the selected market, otherwise picking a US client while the
-  // India book is showing would put the two selectors in contradiction.
-  useEffect(() => {
-    if (!marketReady) return;
-    let active = true;
-    clientsApi
-      .list({ limit: 100, market })
-      .then((list) => {
-        if (!active) return;
-        setClients(list);
-        // Drop a selection that doesn't exist in the newly-selected book,
-        // rather than leaving a stale name in the button.
-        setWorkspaceId((current) =>
-          current && list.some((c) => c.id === current) ? current : null,
-        );
-      })
-      .catch(() => {
-        /* leave the switcher empty if clients can't be loaded */
-      });
-    return () => {
-      active = false;
-    };
-  }, [market, marketReady]);
-
-  const workspace = clients.find((c) => c.id === workspaceId) ?? null;
-  const workspaceName = workspace?.name ?? 'Select client';
 
   const segments = pathname.split('/').filter(Boolean);
 
@@ -173,40 +143,12 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
         }
       />
 
-      {/* Workspace selector */}
-      <Dropdown
-        width={240}
-        items={clients.map((c) => ({
-          label: c.name,
-          icon: c.id === workspaceId ? <Check className="h-4 w-4 text-brand" /> : <span className="h-4 w-4" />,
-          onClick: () => setWorkspaceId(c.id),
-        }))}
-        trigger={
-          <button
-            className={cn(
-              'hidden h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium transition-colors hover:bg-surface-2 lg:flex',
-              // Muted until a client is chosen, so the prompt reads as a
-              // placeholder rather than as a selected value.
-              workspace ? 'text-ink' : 'text-ink-secondary'
-            )}
-          >
-            {workspace && (
-              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-brand to-brand-active text-2xs font-bold text-white">
-                {workspace.name.charAt(0)}
-              </span>
-            )}
-            <span className="max-w-[140px] truncate">{workspaceName}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
-          </button>
-        }
-      />
-
       {/* Quick action */}
       <Dropdown
         width={210}
         items={[
           { label: 'Add Client', icon: <UserPlus className="h-4 w-4" />, onClick: () => router.push('/clients/add') },
-          { label: 'Add Symbol', icon: <Plus className="h-4 w-4" />, onClick: () => router.push('/symbols/add') },
+          { label: 'Add Holding', icon: <Plus className="h-4 w-4" />, onClick: () => router.push('/symbols/add') },
         ]}
         trigger={
           <button className="flex h-9 items-center gap-1.5 rounded-[10px] bg-brand px-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-hover">

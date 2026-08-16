@@ -368,9 +368,6 @@ export default function SettingsPage() {
                           {role ? ROLE_LABELS[role] : '—'}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-[12px] text-ink-tertiary">
-                        Only a Super Admin can change this.
-                      </p>
                     </div>
                   </div>
                 </Card>
