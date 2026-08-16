@@ -18,6 +18,7 @@ import { CreateClientInput, parseApiError } from '@/lib/clients.api';
 import { familiesApi } from '@/lib/families.api';
 import { Family, RiskProfile } from '@/types';
 import { useMarket } from '@/components/layout/MarketContext';
+import { DEFAULT_BENCHMARK, MARKET_BENCHMARKS } from '@/lib/market-scope';
 import { Card, CardHeader, Input, Select, Textarea, Button, Badge, useToast } from '@/components/ui';
 
 /**
@@ -105,6 +106,25 @@ export default function ClientForm({
     return () => {
       mounted = false;
     };
+  }, [market, marketReady]);
+
+  /**
+   * Keep the benchmark on a code that exists in the selected book.
+   *
+   * Fires when the form opens and whenever the book changes. A blank benchmark
+   * takes the book's default (Nifty 50 for India, S&P 500 for the US); a value
+   * belonging to the OTHER book — or one of the free-text strings the old input
+   * allowed — is replaced rather than left to fail resolution later. A valid
+   * code for this book is never touched, so editing an existing mandate does
+   * not silently reassign its benchmark.
+   */
+  useEffect(() => {
+    if (!marketReady) return;
+    setForm((p) => {
+      const valid = MARKET_BENCHMARKS[market].some((b) => b.code === p.benchmark);
+      if (valid) return p;
+      return { ...p, benchmark: DEFAULT_BENCHMARK[market] };
+    });
   }, [market, marketReady]);
 
   const set = <K extends keyof ClientFormValues>(k: K, v: ClientFormValues[K]) => {
@@ -276,16 +296,29 @@ export default function ClientForm({
                 : "The client signs in with this password and the email above"
             }
           />
-          <Input
+          {/*
+            A picker, not free text. The benchmark has to match a seeded
+            Benchmark.code to be joinable to a price series, so typing it by
+            hand could only ever produce an unusable value — which is exactly
+            what happened to the Indian mandates onboarded so far.
+            Options follow the selected book: an Indian mandate is offered the
+            Nifty/Sensex, not the S&P.
+          */}
+          <Select
             label="Benchmark"
             required
-            placeholder="S&P 500"
-            leftIcon={<Target className="h-4 w-4" />}
             value={form.benchmark}
             onChange={(e) => set('benchmark', e.target.value)}
             error={errors.benchmark}
-            helper="Index used for performance comparison"
-          />
+            helper={`Index used for performance comparison (${meta.label} book)`}
+          >
+            <option value="">Select a benchmark…</option>
+            {MARKET_BENCHMARKS[market].map((b) => (
+              <option key={b.code} value={b.code}>
+                {b.label}
+              </option>
+            ))}
+          </Select>
         </div>
       </Card>
 
