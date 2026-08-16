@@ -324,6 +324,48 @@ export interface PortfolioEvent {
   totalEstimatedAmount: number | null;
 }
 
+/** Press coverage vs. a regulator-filed exchange disclosure. */
+export type NewsKind = 'NEWS' | 'FILING';
+
+/**
+ * Materiality tag derived from the headline. Null is the common case and means
+ * general coverage — the tags mark the stories that move a position.
+ */
+export type NewsTag =
+  | 'RESULTS'
+  | 'BUYBACK'
+  | 'M&A'
+  | 'DIVIDEND'
+  | 'MANAGEMENT'
+  | 'RATING'
+  | 'ORDER';
+
+/** One story in the News Center feed. */
+export interface NewsFeedItem {
+  id: string;
+  /** Normalized symbol as stored, e.g. 'RELIANCE.NS'. */
+  ticker: string;
+  /** Display form with the exchange suffix stripped, e.g. 'RELIANCE'. */
+  symbol: string;
+  company: string;
+  market: Market;
+  title: string;
+  /** Outlet name, or 'BSE' for an exchange filing. */
+  publisher: string;
+  url: string;
+  summary: string | null;
+  /** ISO timestamp the story was published upstream. */
+  publishedAt: string;
+  kind: NewsKind;
+  /** Filing category from the exchange. Null for press articles. */
+  category: string | null;
+  tag: NewsTag | null;
+  source: string;
+  /** Tracked but not owned — on the watchlist with no client holding it. */
+  watchlistOnly: boolean;
+  clientCount: number;
+}
+
 /** One client's exposure to an event — a row in the Held By hover. */
 export interface EventHolder {
   clientId: string;
