@@ -47,7 +47,37 @@ const fmtDate = (iso: string) =>
  * SELECTED window — including the benchmark and the alpha. That uniformity is
  * the point: a reader never has to ask what basis a number is on.
  */
-export function PeriodPerformance({ clientId }: { clientId: string }) {
+/**
+ * What the page above needs to know to drive its own header buttons.
+ *
+ * The period, and therefore the data, is chosen INSIDE this component — the
+ * selector belongs beside the figures it labels, not up in the header where it
+ * would sit detached from them. But Export has to ship whatever window is
+ * currently on screen, and it lives in the page header alongside the client
+ * selector. Reporting the loaded window upward is what lets those two facts
+ * coexist without lifting the period control out of the sheet.
+ */
+export interface PeriodSheetState {
+  periodReturn: PeriodReturn | null;
+  asOf: PortfolioAsOf | null;
+  loading: boolean;
+}
+
+export function PeriodPerformance({
+  clientId,
+  /**
+   * Bumped by the page's Refresh button. A counter rather than a callback ref
+   * because it re-triggers the existing load effect through the same
+   * `reloadTick` path the seed flow already uses — no second fetch path to keep
+   * in step with the first.
+   */
+  refreshSignal = 0,
+  onStateChange,
+}: {
+  clientId: string;
+  refreshSignal?: number;
+  onStateChange?: (state: PeriodSheetState) => void;
+}) {
   const { toast } = useToast();
   const currency = useCurrency();
 
@@ -136,7 +166,23 @@ export function PeriodPerformance({ clientId }: { clientId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [clientId, period, customFrom, customTo, reloadTick]);
+  }, [clientId, period, customFrom, customTo, reloadTick, refreshSignal]);
+
+  /**
+   * Mirror the sheet's state up to the page so its header Export button knows
+   * whether there is a window to ship and, when there is, which one.
+   *
+   * Reported from an effect rather than from inside `load` so it also covers
+   * the failure paths, where the page must be told the data went away — an
+   * Export button left enabled after a failed reload would download the
+   * previous period's figures under the newly selected period's name.
+   */
+  useEffect(() => {
+    onStateChange?.({ periodReturn, asOf, loading });
+    // `onStateChange` is intentionally not a dependency: the page passes an
+    // inline callback, so including it would fire this on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodReturn, asOf, loading]);
 
   async function seedBaselines() {
     setSeeding(true);

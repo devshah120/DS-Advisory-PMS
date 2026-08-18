@@ -37,8 +37,14 @@ import {
   Skeleton,
   useToast,
 } from '@/components/ui';
-import { PeriodPerformance } from '@/components/performance/PeriodPerformance';
-import { downloadPerformanceWorkbook } from '@/lib/performanceExport';
+import {
+  PeriodPerformance,
+  PeriodSheetState,
+} from '@/components/performance/PeriodPerformance';
+import {
+  downloadPerformanceWorkbook,
+  downloadPeriodPerformanceWorkbook,
+} from '@/lib/performanceExport';
 
 /** Rate formatting. The engine speaks in fractions (0.12); people read percent. */
 const pct = (v: number, dp = 2) => `${(v * 100).toFixed(dp)}%`;
@@ -55,6 +61,21 @@ export default function PerformancePage() {
   const [result, setResult] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  /**
+   * The period sheet's currently-loaded window, mirrored up from the child.
+   *
+   * The header's Export and Refresh sit above the sheet but act on what is in
+   * it, and on the India path the window is chosen inside the sheet. This is
+   * the minimum the header needs: what to export, and whether it is ready.
+   */
+  const [periodState, setPeriodState] = useState<PeriodSheetState>({
+    periodReturn: null,
+    asOf: null,
+    loading: true,
+  });
+  /** Bumped by Refresh; the period sheet reloads when it changes. */
+  const [periodRefresh, setPeriodRefresh] = useState(0);
 
   /**
    * The Indian book is on the rebuilt period sheet: one view, one period
@@ -124,6 +145,55 @@ export default function PerformancePage() {
     [clients, clientId],
   );
 
+  /**
+   * Refresh means the same thing on both books — reload what is on screen —
+   * but the two sheets own their data differently. The US sheet is fetched
+   * here, so it is reloaded here; the period sheet fetches per window, so it is
+   * told to reload through the signal it already listens on.
+   */
+  const refreshBusy = usePeriodSheet ? periodState.loading : refreshing;
+
+  const handleRefresh = useCallback(() => {
+    if (!clientId) return;
+    if (usePeriodSheet) {
+      setPeriodRefresh((t) => t + 1);
+      return;
+    }
+    setRefreshing(true);
+    load(clientId);
+  }, [clientId, usePeriodSheet, load]);
+
+  /**
+   * Export is disabled until there is a real, computed sheet behind it. On the
+   * period path that means a window whose return actually resolved: exporting a
+   * period the solver could not price would produce a statement of blanks that
+   * still looks like a statement.
+   */
+  const exportDisabled = usePeriodSheet
+    ? periodState.loading || !periodState.periodReturn
+    : !result || result.data.status !== 'ok';
+
+  const handleExport = useCallback(async () => {
+    const name = client?.name ?? 'Client';
+    try {
+      if (usePeriodSheet) {
+        if (!periodState.periodReturn) return;
+        await downloadPeriodPerformanceWorkbook(
+          name,
+          periodState.periodReturn,
+          periodState.asOf,
+          currency,
+        );
+      } else {
+        if (!result) return;
+        await downloadPerformanceWorkbook(name, result, currency);
+      }
+    } catch {
+      toast({ tone: 'error', title: 'Could not build the report' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usePeriodSheet, periodState, result, client, currency]);
+
   usePageHeading({
     title: 'Performance',
     subtitle: usePeriodSheet
@@ -146,45 +216,28 @@ export default function PerformancePage() {
             ))}
           </Select>
         )}
-        {/* Export ships the since-inception sheet, so it stays on that path.
-            The period sheet's export is a separate concern — a sheet of one
-            window labelled as if it were the whole book would be worse than
-            no button at all. */}
-        {!usePeriodSheet && (
-          <>
-            <Button
-              variant="outline"
-              size="md"
-              leftIcon={<Download className="h-4 w-4" />}
-              disabled={!result || result.data.status !== 'ok'}
-              onClick={async () => {
-                if (!result) return;
-                try {
-                  await downloadPerformanceWorkbook(
-                    client?.name ?? 'Client',
-                    result,
-                    currency,
-                  );
-                } catch {
-                  toast({ tone: 'error', title: 'Could not build the report' });
-                }
-              }}
-            >
-              Export
-            </Button>
-            <Button
-              size="md"
-              leftIcon={<RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />}
-              disabled={!clientId || refreshing}
-              onClick={() => {
-                setRefreshing(true);
-                if (clientId) load(clientId);
-              }}
-            >
-              Refresh
-            </Button>
-          </>
-        )}
+        {/* Both books get Export and Refresh; only what they act on differs.
+            The period sheet ships the SELECTED window and says so on the sheet
+            itself — the earlier objection was to a one-window export labelled
+            as if it were the whole book, which the period workbook's own
+            time-frame line and footnotes rule out. */}
+        <Button
+          variant="outline"
+          size="md"
+          leftIcon={<Download className="h-4 w-4" />}
+          disabled={exportDisabled}
+          onClick={handleExport}
+        >
+          Export
+        </Button>
+        <Button
+          size="md"
+          leftIcon={<RefreshCw className={cn('h-4 w-4', refreshBusy && 'animate-spin')} />}
+          disabled={!clientId || refreshBusy}
+          onClick={handleRefresh}
+        >
+          Refresh
+        </Button>
       </>
     ),
   });
@@ -206,7 +259,14 @@ export default function PerformancePage() {
           description="Add a client and their performance sheet appears here."
         />
       ) : usePeriodSheet ? (
-        clientId && <PeriodPerformance key={clientId} clientId={clientId} />
+        clientId && (
+          <PeriodPerformance
+            key={clientId}
+            clientId={clientId}
+            refreshSignal={periodRefresh}
+            onStateChange={setPeriodState}
+          />
+        )
       ) : !result ? (
         <EmptyState
           title="Nothing to show"
