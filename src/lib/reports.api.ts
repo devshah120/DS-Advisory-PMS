@@ -1,5 +1,5 @@
 import { apiClient } from './api';
-import { ClientFeeRow, FeeQuarterOption } from '@/types/reports';
+import { ClientFeeRow, FeeQuarterOption, CapitalGainsReport } from '@/types/reports';
 import type { Market } from './market-scope';
 
 export const reportsApi = {
@@ -18,6 +18,31 @@ export const reportsApi = {
     const res = await apiClient.getClient().get<ClientFeeRow[]>('/reports/fees', {
       params: { ...(quarter ? { quarter } : {}), ...(market ? { market } : {}) },
     });
+    return res.data;
+  },
+
+
+  /**
+   * One client's FIFO capital-gains statement.
+   *
+   * `fiscalYear` is the full four-digit year (2027), not the label's two digits —
+   * "FY27" is a display form only. Omitted means the most recent year with
+   * realized activity, so the page opens on data rather than an empty state.
+   */
+  async capitalGains(clientId: string, fiscalYear?: number): Promise<CapitalGainsReport> {
+    const res = await apiClient
+      .getClient()
+      .get<CapitalGainsReport>(`/reports/capital-gains/${clientId}`, {
+        params: fiscalYear ? { fiscalYear } : {},
+      });
+    return res.data;
+  },
+
+  /** The fiscal-year dropdown options for one client, newest first. */
+  async capitalGainsYears(clientId: string): Promise<number[]> {
+    const res = await apiClient
+      .getClient()
+      .get<number[]>(`/reports/capital-gains/${clientId}/years`);
     return res.data;
   },
 

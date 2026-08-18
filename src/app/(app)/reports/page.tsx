@@ -16,6 +16,7 @@ import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
 import { downloadClientFeeWorkbook } from '@/lib/feeExport';
 import { ClientFeeRow, FeeQuarterOption } from '@/types/reports';
+import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, Badge, Button, Select, useToast } from '@/components/ui';
@@ -287,6 +288,9 @@ export default function ReportsPage() {
             ))}
           </div>
         </div>
+
+        {/* Capital Gains — FIFO, cut on the client's own fiscal calendar. */}
+        <CapitalGainsPanel />
 
         {/* Fee Schedule */}
         <Card padding="none">
