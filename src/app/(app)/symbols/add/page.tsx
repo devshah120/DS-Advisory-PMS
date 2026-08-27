@@ -22,7 +22,6 @@ import {
 } from '@/lib/utils';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
-import { displayTicker } from '@/lib/market-scope';
 import { Card, CardHeader, Input, Select, Button, useToast } from '@/components/ui';
 
 /** Today in the yyyy-mm-dd shape a date input expects, in local time. */
@@ -132,15 +131,20 @@ export default function AddSymbolPage() {
       const data = await marketApi.lookup(ticker, market, controller.signal);
       if (controller.signal.aborted) return;
 
-      setForm((prev) => {
-        // A later keystroke may have changed the ticker while this was in
-        // flight. Compare against BOTH forms of the resolved symbol: under the
-        // Indian book the user typed "RELIANCE" while the server answers
-        // "RELIANCE.NS", and matching only the qualified form would discard
-        // every Indian lookup as stale.
-        const typed = prev.ticker.trim().toUpperCase();
-        if (typed !== data.ticker && typed !== data.displayTicker) return prev;
+      // A later keystroke may have superseded this request. Compare against the
+      // ticker THIS call asked for, and bail before touching any state — the
+      // guard used to sit inside setForm, which left `resolved` and `status` to
+      // be written by whichever response happened to land last. Extending "HEI"
+      // to "HEI-A" would then save the position under the common stock: both
+      // classes report the same company and exchange, so nothing on the form
+      // revealed that the earlier response had won.
+      //
+      // Compare BOTH forms of the resolved symbol: under the Indian book the
+      // user typed "RELIANCE" while the server answers "RELIANCE.NS", and
+      // matching only the qualified form would discard every Indian lookup.
+      if (ticker !== data.ticker && ticker !== data.displayTicker) return;
 
+      setForm((prev) => {
         const next = { ...prev };
         for (const field of AUTOFILLED) {
           if (touched.current.has(field)) continue;
@@ -177,6 +181,13 @@ export default function AddSymbolPage() {
       setResolved(null);
       return;
     }
+    // Drop the previous resolution the moment the ticker changes. Without this
+    // the form would still be holding the symbol resolved for the OLD text
+    // while the new lookup is in flight, and submitting in that window saves
+    // the position under the previous ticker.
+    setResolved(null);
+    setStatus('loading');
+
     const id = setTimeout(() => runLookup(ticker), DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [form.ticker, runLookup]);
@@ -188,7 +199,12 @@ export default function AddSymbolPage() {
   // showing the resulting blended basis beats letting it surprise the user
   // after the fact.
   useEffect(() => {
-    const ticker = form.ticker.trim().toUpperCase();
+    // Key off the RESOLVED symbol, not the raw text. The server merges a buy on
+    // an exact ticker match, so matching the half-typed "HEI" against the HEICO
+    // common lot would promise a merge that a "HEI-A" buy will not actually make.
+    // Waiting for the resolution keeps this preview honest about which lot the
+    // trade lands in.
+    const ticker = resolved?.symbol;
     if (!form.clientId || !ticker) {
       setOpenLot(null);
       return;
@@ -203,15 +219,10 @@ export default function AddSymbolPage() {
       .then((r) => {
         if (cancelled) return;
         const rows = Array.isArray(r.data) ? r.data : [];
-        // Holdings are stored fully qualified, so a typed "RELIANCE" has to be
-        // matched against the stored "RELIANCE.NS" too — otherwise a sell into
-        // an existing Indian lot would find nothing and be rejected as having
-        // no open position.
+        // `resolved.symbol` is already fully qualified, so this matches the
+        // stored form directly — the same key the server merges on.
         const match = rows.find(
-          (h) =>
-            h.quantity > 0 &&
-            (h.ticker?.toUpperCase() === ticker ||
-              displayTicker(h.ticker ?? '') === ticker),
+          (h) => h.quantity > 0 && h.ticker?.toUpperCase() === ticker,
         );
         setOpenLot(match ?? null);
       })
@@ -225,7 +236,7 @@ export default function AddSymbolPage() {
     return () => {
       cancelled = true;
     };
-  }, [form.clientId, form.ticker]);
+  }, [form.clientId, resolved?.symbol]);
 
   const qty = parseFloat(form.quantity) || 0;
   const amountInvested = parseFloat(form.amountInvested) || 0;
@@ -399,7 +410,11 @@ export default function AddSymbolPage() {
     status === 'loading'
       ? 'Looking up symbol…'
       : status === 'found' && resolved
-        ? `${resolved.company}${resolved.exchange ? ` · ${resolved.exchange}` : ''}`
+        ? // Lead with the SYMBOL that actually resolved. Share classes of the
+          // same issuer return an identical company and exchange (HEI and HEI-A
+          // are both "HEICO Corporation · NYSE"), so without the symbol here
+          // there is nothing on the form that distinguishes the one being saved.
+          `${resolved.symbol} · ${resolved.company}${resolved.exchange ? ` · ${resolved.exchange}` : ''}`
         : status === 'error'
           ? 'Lookup unavailable — enter details manually'
           : undefined;
