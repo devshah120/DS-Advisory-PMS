@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet, Layers, List } from 'lucide-react';
+import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet, Layers, List, Trash2, AlertTriangle } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
 import { transactionsApi } from '@/lib/transactions.api';
 import { formatCurrency, formatCompactCurrency, cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ import {
   Tabs,
   Badge,
   Button,
+  Modal,
   DataTable,
   exportToCsv,
   useToast,
@@ -53,6 +54,13 @@ export default function TransactionsPage() {
   const [grouped, setGrouped] = useState(false);
   const [flowModalOpen, setFlowModalOpen] = useState(false);
   const [dividendModalOpen, setDividendModalOpen] = useState(false);
+
+  // Deleting is staged rather than immediate: a transaction is ledger data, and
+  // removing one silently rewrites the client's XIRR. `pending` holds the rows
+  // the confirm dialog is asking about, along with the table's own callback to
+  // untick them once they are gone.
+  const [pending, setPending] = useState<{ rows: TxRow[]; clear: () => void } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!marketReady) return;
@@ -157,6 +165,59 @@ export default function TransactionsPage() {
   const outflows = cashFlowRows
     .filter((t) => !isInflowRow(t))
     .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  /**
+   * Commit the staged deletion.
+   *
+   * The list is patched from the ids the server confirms rather than the ids
+   * sent: a row already deleted in another session is dropped by the backend's
+   * ownership filter, so trusting the request would leave the table claiming a
+   * delete that never happened. On a partial result the whole selection is
+   * still removed locally — every id in it is provably gone or not ours — and
+   * the difference is surfaced instead of hidden.
+   */
+  const confirmDelete = async () => {
+    if (!pending) return;
+    const { rows, clear } = pending;
+    const ids = rows.map((r) => r.id);
+
+    setDeleting(true);
+    try {
+      const { deleted } = await transactionsApi.removeMany(ids);
+
+      const gone = new Set(ids);
+      setTxns((prev) => prev.filter((t) => !gone.has(t.id)));
+      clear();
+      setPending(null);
+
+      toast({
+        tone: 'success',
+        title: `${deleted} transaction${deleted === 1 ? '' : 's'} deleted`,
+        description:
+          deleted < ids.length
+            ? `${ids.length - deleted} were already removed elsewhere.`
+            : 'Affected clients’ returns have been recalculated.',
+      });
+    } catch {
+      // Nothing is removed from the list on failure — the selection stays
+      // ticked so the operator can retry the same rows.
+      toast({
+        tone: 'error',
+        title: 'Delete failed',
+        description: 'No transactions were removed. Please try again.',
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  /** Rows in the staged selection that feed a client's XIRR, per their method. */
+  const pendingFlowCount = pending ? pending.rows.filter(isFlowRow).length : 0;
+
+  /** Distinct clients the staged deletion touches — each one's return moves. */
+  const pendingClients = pending
+    ? [...new Set(pending.rows.map((r) => r.client?.name ?? 'Unknown client'))]
+    : [];
 
   const columns: Column<TxRow>[] = [
     {
@@ -415,8 +476,19 @@ export default function TransactionsPage() {
             data={filtered}
             loading={loading}
             rowKey={(r) => r.id}
+            selectable
             searchPlaceholder="Search by instrument or client…"
             searchKeys={(r) => `${r.ticker ?? ''} ${r.client?.name ?? ''} ${r.type}`}
+            bulkActions={(rows, clear) => (
+              <Button
+                variant="danger"
+                size="sm"
+                leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                onClick={() => setPending({ rows, clear })}
+              >
+                Delete
+              </Button>
+            )}
             onExport={(rows) => {
               // Export what is on screen — the flows view has its own column set.
               exportToCsv(
@@ -443,6 +515,90 @@ export default function TransactionsPage() {
           />
         )}
       </div>
+
+      {/*
+        Confirmation is not ceremony here: a deleted buy or deposit leaves the
+        client's XIRR, so the dialog names the clients affected and how many of
+        the rows actually drive a return, rather than just counting them.
+      */}
+      <Modal
+        isOpen={!!pending}
+        onClose={() => !deleting && setPending(null)}
+        title={
+          pending
+            ? `Delete ${pending.rows.length} transaction${pending.rows.length === 1 ? '' : 's'}?`
+            : ''
+        }
+        description="This permanently removes the entries from the ledger. It cannot be undone."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setPending(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={confirmDelete}
+              loading={deleting}
+              leftIcon={<Trash2 className="h-4 w-4" />}
+            >
+              Delete {pending?.rows.length ?? 0}
+            </Button>
+          </>
+        }
+      >
+        {pending && (
+          <div className="space-y-4">
+            {pendingFlowCount > 0 && (
+              <div className="flex gap-3 rounded-[12px] border border-warning/30 bg-warning/10 p-3.5">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <p className="text-[13px] leading-relaxed text-ink-secondary">
+                  <span className="font-medium text-ink">
+                    {pendingFlowCount} of these drive a client&apos;s return.
+                  </span>{' '}
+                  Removing them changes the XIRR reported on the Performance screen for{' '}
+                  {pendingClients.length === 1
+                    ? pendingClients[0]
+                    : `${pendingClients.length} clients`}
+                  .
+                </p>
+              </div>
+            )}
+
+            <div className="max-h-56 overflow-y-auto rounded-[12px] border border-border">
+              <table className="w-full">
+                <tbody className="divide-y divide-border">
+                  {pending.rows.map((r) => {
+                    const meta = txMeta[r.type] ?? { tone: 'neutral', label: r.type };
+                    return (
+                      <tr key={r.id} className="text-[13px]">
+                        <td className="px-3 py-2.5">
+                          <Badge tone={meta.tone} dot>
+                            {meta.label}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 font-medium text-ink">{r.ticker ?? '—'}</td>
+                        <td className="max-w-[160px] truncate px-3 py-2.5 text-ink-secondary">
+                          {r.client?.name ?? '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-ink">
+                          {formatCurrency(r.amount, currency)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-right text-ink-tertiary">
+                          {new Date(r.date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <CashFlowModal
         isOpen={flowModalOpen}

@@ -41,4 +41,21 @@ export const transactionsApi = {
   async remove(id: string) {
     await apiClient.getClient().delete(`/transactions/${id}`);
   },
+
+  /**
+   * Delete a selection in one round trip.
+   *
+   * `deleted` can be lower than `ids.length` — the backend keeps only the rows
+   * still present and still in the caller's book — so the caller should report
+   * that number rather than assuming the whole selection went.
+   */
+  async removeMany(ids: string[]) {
+    const res = await apiClient
+      .getClient()
+      .post<{ success: boolean; requested: number; deleted: number }>(
+        '/transactions/bulk-delete',
+        { ids }
+      );
+    return res.data;
+  },
 };

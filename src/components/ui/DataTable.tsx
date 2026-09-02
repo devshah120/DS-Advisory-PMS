@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Search,
@@ -45,7 +45,13 @@ interface DataTableProps<T> {
   searchKeys?: (row: T) => string;
   selectable?: boolean;
   pageSize?: number;
-  bulkActions?: (selected: T[]) => ReactNode;
+  /**
+   * Rendered in the bar that appears once rows are ticked. `clearSelection` is
+   * passed in because an action that removes rows has to drop their ids too —
+   * the table cannot know an action consumed the selection rather than merely
+   * acting on it.
+   */
+  bulkActions?: (selected: T[], clearSelection: () => void) => ReactNode;
   onExport?: (rows: T[]) => void;
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
@@ -142,6 +148,21 @@ export function DataTable<T>({
   };
 
   const selectedRows = data.filter((r) => selected.has(rowKey(r)));
+
+  // Rows can leave `data` while still ticked — deleted here, filtered out by a
+  // tab change, or reloaded from the server. Their ids would otherwise keep
+  // inflating the "N selected" count against rows that are no longer on screen,
+  // and hand a bulk action ids it cannot act on. Reconciled against the id set
+  // rather than the row objects so an unrelated re-render does not loop.
+  const presentIds = useMemo(() => new Set(data.map(rowKey)), [data, rowKey]);
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => presentIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [presentIds]);
+
+  const clearSelection = () => setSelected(new Set());
 
   return (
     <div className="card overflow-hidden p-0">
@@ -240,8 +261,8 @@ export function DataTable<T>({
                 {selected.size} selected
               </span>
               <div className="flex items-center gap-2">
-                {bulkActions?.(selectedRows)}
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                {bulkActions?.(selectedRows, clearSelection)}
+                <Button variant="ghost" size="sm" onClick={clearSelection}>
                   Clear
                 </Button>
               </div>
