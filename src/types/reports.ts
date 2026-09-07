@@ -23,6 +23,59 @@ export interface ClientFeeRow {
   currency: string;
 }
 
+/** One member account that could not be billed this quarter, and why. */
+export interface UnbilledMember {
+  clientId: string;
+  clientName: string;
+  reason: string;
+}
+
+/**
+ * A household's fee invoice for one quarter.
+ *
+ * `lines` are the members' OWN fee rows, unchanged — the household total is
+ * their sum, never a recomputation from a combined portfolio value. That is
+ * what guarantees this invoice and each member's individual statement agree.
+ */
+export interface FamilyFeeInvoice {
+  familyId: string;
+  familyName: string;
+  market: string;
+  /** The single unit every figure is in — a family lives in one book. */
+  currency: string;
+
+  quarter: string;
+  quarterLabel: string;
+  quarterStart: string;
+  quarterEnd: string;
+  /** True while the quarter is open: the invoice is an estimate, not a bill. */
+  isEstimate: boolean;
+
+  lines: ClientFeeRow[];
+  /** Members not billable this quarter, named rather than silently dropped. */
+  unbilled: UnbilledMember[];
+
+  totals: {
+    memberCount: number;
+    billedCount: number;
+    portfolioValue: number;
+    feeAmount: number;
+    /**
+     * Back-solved from what was billed, against the value-weighted proration.
+     * Null when nothing was billable. Members can sit on different rates, so no
+     * single member's rate describes the household.
+     */
+    effectiveAnnualRatePercent: number | null;
+  };
+}
+
+/** One entry in the household selector on the fee page. */
+export interface InvoiceableFamily {
+  id: string;
+  name: string;
+  memberCount: number;
+}
+
 /** One entry in the quarter dropdown. */
 export interface FeeQuarterOption {
   code: string;

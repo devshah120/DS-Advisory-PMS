@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   FileText,
   FileBarChart,
   FileSpreadsheet,
@@ -14,8 +15,16 @@ import {
 } from 'lucide-react';
 import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
-import { downloadClientFeeWorkbook } from '@/lib/feeExport';
-import { ClientFeeRow, FeeQuarterOption } from '@/types/reports';
+import {
+  downloadClientFeeWorkbook,
+  downloadFamilyInvoiceWorkbook,
+} from '@/lib/feeExport';
+import {
+  ClientFeeRow,
+  FeeQuarterOption,
+  FamilyFeeInvoice,
+  InvoiceableFamily,
+} from '@/types/reports';
 import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
@@ -129,6 +138,21 @@ export default function ReportsPage() {
   const [quarter, setQuarter] = useState('');
   const [clientFilter, setClientFilter] = useState('');
 
+  // --- household invoicing ---
+  /**
+   * The subject of the fee view: the whole book, one client, or one household.
+   *
+   * Encoded as a single prefixed value ('client:<id>' / 'family:<id>') in ONE
+   * selector rather than as a separate control, because a reviewer moves
+   * between "bill the family" and "check one account" constantly. A second
+   * dropdown would make that a two-step act, and two independent filters could
+   * also be set to contradict each other.
+   */
+  const [families, setFamilies] = useState<InvoiceableFamily[]>([]);
+  const [familyId, setFamilyId] = useState('');
+  const [invoice, setInvoice] = useState<FamilyFeeInvoice | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     reportsApi
@@ -169,6 +193,59 @@ export default function ReportsPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quarter, market, marketReady]);
+
+  /**
+   * The book's households. A failure here leaves the page billing individual
+   * mandates only — its primary job — rather than failing outright.
+   */
+  useEffect(() => {
+    if (!marketReady) return;
+    let mounted = true;
+    reportsApi
+      .invoiceableFamilies(market)
+      .then((rows) => mounted && setFamilies(rows))
+      .catch(() => mounted && setFamilies([]));
+    return () => {
+      mounted = false;
+    };
+  }, [market, marketReady]);
+
+  /**
+   * The selected household's invoice, fetched per household and per quarter.
+   *
+   * Deliberately server-side rather than assembled in the browser from `fees`:
+   * the backend reads the family's own book (which may differ from the viewer's
+   * market selector), applies the ownership boundary, and reuses the same
+   * frozen fee rows an individual statement would. Rebuilding that here is how
+   * two documents end up disagreeing about one bill.
+   */
+  useEffect(() => {
+    if (!familyId) {
+      setInvoice(null);
+      return;
+    }
+    let mounted = true;
+    setInvoiceLoading(true);
+    reportsApi
+      .familyInvoice(familyId, quarter || undefined)
+      .then((inv) => mounted && setInvoice(inv))
+      .catch(() => {
+        if (!mounted) return;
+        setInvoice(null);
+        toast({ tone: 'error', title: 'Failed to load the household invoice' });
+      })
+      .finally(() => mounted && setInvoiceLoading(false));
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyId, quarter]);
+
+  // A household selected in one book must not stay selected across a switch:
+  // its invoice would be denominated in the other book's currency.
+  useEffect(() => {
+    setFamilyId('');
+  }, [market]);
 
   // Clients present in this quarter — derived from the rows themselves rather
   // than the full client list, so the dropdown can't offer a client who wasn't
@@ -230,6 +307,26 @@ export default function ReportsPage() {
         tone: 'success',
         title: `Exported ${visibleFees.length} fee schedule${visibleFees.length === 1 ? '' : 's'}`,
       });
+    }
+  };
+
+  /** The household bill, as one workbook itemised by account. */
+  const exportInvoice = async () => {
+    if (!invoice) return;
+    setExportingId(invoice.familyId);
+    try {
+      await downloadFamilyInvoiceWorkbook(invoice);
+      toast({
+        tone: 'success',
+        title: `Invoice exported — ${invoice.familyName}`,
+        description: `${invoice.totals.billedCount} account${
+          invoice.totals.billedCount === 1 ? '' : 's'
+        } · ${invoice.quarterLabel}`,
+      });
+    } catch {
+      toast({ tone: 'error', title: 'Failed to export the invoice' });
+    } finally {
+      setExportingId(null);
     }
   };
 
@@ -296,29 +393,62 @@ export default function ReportsPage() {
         <Card padding="none">
           <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
             <CardHeader
-              title="Fee Schedule"
+              title={familyId && invoice ? `Invoice — ${invoice.familyName}` : 'Fee Schedule'}
               subtitle={
-                selectedQuarter
-                  ? `${selectedQuarter.label} · ${
-                      selectedQuarter.closed
-                        ? 'closed — billed on quarter-end value'
-                        : 'in progress — estimated on live value'
-                    }, prorated by inception date`
-                  : 'Management fees, prorated by inception date'
+                familyId && invoice
+                  ? `${invoice.quarterLabel} · one bill for ${invoice.totals.billedCount} of ` +
+                    `${invoice.totals.memberCount} account${
+                      invoice.totals.memberCount === 1 ? '' : 's'
+                    }, each charged at its own rate`
+                  : selectedQuarter
+                    ? `${selectedQuarter.label} · ${
+                        selectedQuarter.closed
+                          ? 'closed — billed on quarter-end value'
+                          : 'in progress — estimated on live value'
+                      }, prorated by inception date`
+                    : 'Management fees, prorated by inception date'
               }
             />
             <div className="flex flex-wrap items-center gap-2">
+              {/* One selector, two groups. Picking a household switches the
+                  card to its invoice; picking a client filters the fee table
+                  as before. Prefixed values because a family id and a client
+                  id are both opaque cuids. */}
               <Select
-                value={clientFilter}
-                onChange={(e) => setClientFilter(e.target.value)}
-                aria-label="Client"
+                value={familyId ? `family:${familyId}` : clientFilter ? `client:${clientFilter}` : ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.startsWith('family:')) {
+                    setFamilyId(v.slice('family:'.length));
+                    setClientFilter('');
+                  } else if (v.startsWith('client:')) {
+                    setClientFilter(v.slice('client:'.length));
+                    setFamilyId('');
+                  } else {
+                    setClientFilter('');
+                    setFamilyId('');
+                  }
+                }}
+                aria-label="Client or household"
               >
                 <option value="">All clients</option>
-                {clientOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {families.length > 0 && (
+                  <optgroup label="Households (invoice)">
+                    {families.map((f) => (
+                      <option key={f.id} value={`family:${f.id}`}>
+                        {f.name} · {f.memberCount}{' '}
+                        {f.memberCount === 1 ? 'account' : 'accounts'}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={families.length > 0 ? 'Individual accounts' : 'Accounts'}>
+                  {clientOptions.map((c) => (
+                    <option key={c.id} value={`client:${c.id}`}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
               </Select>
               <Select
                 value={quarter}
@@ -332,18 +462,33 @@ export default function ReportsPage() {
                   </option>
                 ))}
               </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={<Download className="h-3.5 w-3.5" />}
-                disabled={feesLoading || visibleFees.length === 0}
-                loading={exportingId === ALL_EXPORT_ID}
-                onClick={exportAll}
-              >
-                Export all
-              </Button>
+              {familyId ? (
+                <Button
+                  size="sm"
+                  leftIcon={<Download className="h-3.5 w-3.5" />}
+                  disabled={invoiceLoading || !invoice || invoice.lines.length === 0}
+                  loading={exportingId === familyId}
+                  onClick={exportInvoice}
+                >
+                  Export invoice
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<Download className="h-3.5 w-3.5" />}
+                  disabled={feesLoading || visibleFees.length === 0}
+                  loading={exportingId === ALL_EXPORT_ID}
+                  onClick={exportAll}
+                >
+                  Export all
+                </Button>
+              )}
             </div>
           </div>
+          {familyId ? (
+            <FamilyInvoiceView invoice={invoice} loading={invoiceLoading} />
+          ) : (
           <table className="w-full">
             <thead>
               <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
@@ -427,6 +572,7 @@ export default function ReportsPage() {
               </tfoot>
             )}
           </table>
+          )}
         </Card>
 
         {/* Recent reports */}
@@ -483,5 +629,137 @@ export default function ReportsPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * The household invoice, as it appears on screen.
+ *
+ * Same columns as the fee table it replaces, so a reader moving between "the
+ * whole book" and "this family" is reading the same document at two scopes
+ * rather than learning a second layout. The additions are the ones a bill
+ * needs and a table does not: an estimate banner, a household total, and the
+ * accounts that were not billable.
+ */
+function FamilyInvoiceView({
+  invoice,
+  loading,
+}: {
+  invoice: FamilyFeeInvoice | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+        Loading invoice…
+      </div>
+    );
+  }
+
+  if (!invoice) {
+    return (
+      <div className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+        No invoice for this household.
+      </div>
+    );
+  }
+
+  const money = invoice.currency;
+
+  return (
+    <div>
+      {/* An open quarter is an estimate. Said before the figures, not after —
+          a household bill mistaken for a final one gets paid. */}
+      {invoice.isEstimate && (
+        <div className="flex items-start gap-2.5 border-b border-amber-200 bg-amber-50 px-5 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p className="text-[12px] leading-relaxed text-amber-900">
+            <span className="font-semibold">Estimate</span> — {invoice.quarterLabel} has not
+            closed. These figures use live portfolio values and will change before the quarter is
+            billed.
+          </p>
+        </div>
+      )}
+
+      <table className="w-full">
+        <thead>
+          <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            <th className="px-5 py-2.5">Account</th>
+            <th className="px-5 py-2.5 text-right">Annual Rate</th>
+            <th className="px-5 py-2.5 text-right">Portfolio Value</th>
+            <th className="px-5 py-2.5 text-right">Days Billed</th>
+            <th className="px-5 py-2.5 text-right">Fee Amount</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {invoice.lines.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                No account in this household was billable for {invoice.quarterLabel}.
+              </td>
+            </tr>
+          ) : (
+            invoice.lines.map((line) => (
+              <tr key={line.clientId} className="hover:bg-surface-2">
+                <td className="px-5 py-3 text-[13px] font-medium text-ink">{line.clientName}</td>
+                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                  {line.feeRatePercent.toFixed(2)}%
+                </td>
+                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                  {formatCurrency(line.portfolioValue, line.currency || money)}
+                </td>
+                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
+                  {line.daysBilled} / {line.daysInQuarter}
+                </td>
+                <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                  {formatCurrency(line.feeAmount, line.currency || money)}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+        {invoice.lines.length > 0 && (
+          <tfoot>
+            <tr className="border-t-2 border-border bg-surface-2">
+              <td className="px-5 py-3 text-[13px] font-semibold text-ink">
+                Total due
+                {invoice.totals.effectiveAnnualRatePercent !== null && (
+                  // An effective rate, not one anyone was charged — labelled so
+                  // it is never quoted back as the household's headline rate.
+                  <span className="ml-2 font-normal text-[12px] text-ink-tertiary">
+                    {invoice.totals.effectiveAnnualRatePercent.toFixed(2)}% effective
+                  </span>
+                )}
+              </td>
+              <td />
+              <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                {formatCurrency(invoice.totals.portfolioValue, money)}
+              </td>
+              <td />
+              <td className="px-5 py-3 text-right text-[14px] font-semibold tabular-nums text-ink">
+                {formatCurrency(invoice.totals.feeAmount, money)}
+              </td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+
+      {/* Named, not dropped: a household bill missing an account still looks
+          complete, and the family is least able to notice the omission. */}
+      {invoice.unbilled.length > 0 && (
+        <div className="border-t border-border px-5 py-4">
+          <p className="text-[12px] font-semibold text-ink-secondary">
+            Not billed this quarter
+          </p>
+          <ul className="mt-2 space-y-1">
+            {invoice.unbilled.map((u) => (
+              <li key={u.clientId} className="text-[12px] text-ink-tertiary">
+                <span className="font-medium text-ink-secondary">{u.clientName}</span> — {u.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }

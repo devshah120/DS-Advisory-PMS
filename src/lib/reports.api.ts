@@ -1,5 +1,11 @@
 import { apiClient } from './api';
-import { ClientFeeRow, FeeQuarterOption, CapitalGainsReport } from '@/types/reports';
+import {
+  ClientFeeRow,
+  FeeQuarterOption,
+  CapitalGainsReport,
+  FamilyFeeInvoice,
+  InvoiceableFamily,
+} from '@/types/reports';
 import type { Market } from './market-scope';
 
 export const reportsApi = {
@@ -21,6 +27,32 @@ export const reportsApi = {
     return res.data;
   },
 
+
+  /** The households this manager can invoice, for the fee page's selector. */
+  async invoiceableFamilies(market?: Market): Promise<InvoiceableFamily[]> {
+    const res = await apiClient
+      .getClient()
+      .get<InvoiceableFamily[]>('/reports/fees/families', {
+        params: market ? { market } : undefined,
+      });
+    return res.data;
+  },
+
+  /**
+   * One household's invoice for a quarter — the member fee lines plus the
+   * household total, ready to send to the family.
+   *
+   * No `market` param: the backend reads the book off the FAMILY record, which
+   * cannot go stale the way a value passed from the UI's market toggle can.
+   */
+  async familyInvoice(familyId: string, quarter?: string): Promise<FamilyFeeInvoice> {
+    const res = await apiClient
+      .getClient()
+      .get<FamilyFeeInvoice>(`/reports/fees/family/${familyId}`, {
+        params: quarter ? { quarter } : {},
+      });
+    return res.data;
+  },
 
   /**
    * One client's FIFO capital-gains statement.
