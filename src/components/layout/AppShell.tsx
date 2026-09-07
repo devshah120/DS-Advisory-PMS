@@ -82,7 +82,10 @@ function AppShellInner({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Restore collapse preference
+  // Restore collapse preference.
+  // The 'atlas:' prefix is a leftover from the interim product name, kept on
+  // purpose — it is already written into users' browsers, and renaming it would
+  // reset everyone's sidebar. Never displayed.
   useEffect(() => {
     const saved = localStorage.getItem('atlas:sidebar-collapsed');
     if (saved) setCollapsed(saved === '1');
@@ -117,7 +120,7 @@ function AppShellInner({
       <div className="flex min-h-screen items-center justify-center bg-app">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-brand" />
-          <p className="text-[13px] text-ink-tertiary">Loading Giriraj Global Capital…</p>
+          <p className="text-[13px] text-ink-tertiary">Loading Giriraj Global Consultants…</p>
         </div>
       </div>
     );

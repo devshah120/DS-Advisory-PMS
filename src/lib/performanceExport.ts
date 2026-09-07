@@ -186,7 +186,7 @@ export function buildPerformanceWorkbook(
   }
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Performance Summary', {
@@ -554,7 +554,7 @@ export function buildPeriodPerformanceWorkbook(
   currency: string,
 ): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Performance Summary', {
@@ -861,7 +861,7 @@ export function buildFamilyPerformanceWorkbook(
   currency: string,
 ): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Household Summary', {

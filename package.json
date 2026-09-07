@@ -1,7 +1,7 @@
 {
-  "name": "atlas-pms-frontend",
+  "name": "ggc-pms-frontend",
   "version": "1.0.0",
-  "description": "Atlas PMS - Portfolio Management System Frontend",
+  "description": "Giriraj Global Consultants - Portfolio Management System Frontend",
   "private": true,
   "scripts": {
     "dev": "next dev",

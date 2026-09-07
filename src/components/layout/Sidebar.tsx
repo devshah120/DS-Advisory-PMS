@@ -75,7 +75,7 @@ export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps)
               exit={{ opacity: 0 }}
               className="min-w-0"
             >
-              <p className="truncate text-[15px] font-semibold tracking-tight text-ink">Giriraj Global Capital</p>
+              <p className="truncate text-[15px] font-semibold tracking-tight text-ink">Giriraj Global Consultants</p>
               <p className="truncate text-[11px] text-ink-tertiary">Equity &amp; ETF Advisory</p>
             </motion.div>
           )}

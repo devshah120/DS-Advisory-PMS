@@ -246,7 +246,7 @@ export default function FundamentalsPage() {
     {
       title: 'Fundamentals',
       subtitle:
-        'Atlas Fundamental Score — Growth At Reasonable Price, scored against a configurable rules engine',
+        'GGC Fundamental Score — Growth At Reasonable Price, scored against a configurable rules engine',
       actions: (
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-[10px] border border-border bg-surface-2 p-1">

@@ -10,9 +10,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Giriraj Global Capital — Equity & ETF Advisory',
+  title: 'Giriraj Global Consultants — Equity & ETF Advisory',
   description:
-    'Giriraj Global Capital Portfolio Management System. Equity and ETF analytics, holdings, and reporting across country, commodity, and sectoral opportunities.',
+    'Giriraj Global Consultants Portfolio Management System. Equity and ETF analytics, holdings, and reporting across country, commodity, and sectoral opportunities.',
 };
 
 export default function RootLayout({

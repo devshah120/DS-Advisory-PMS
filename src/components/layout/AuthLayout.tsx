@@ -34,7 +34,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="mt-6 flex items-center justify-center text-[12px] text-ink-tertiary">
-          <span>&copy; {new Date().getFullYear()} Giriraj Global Capital LLP. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} Giriraj Global Consultants LLP. All rights reserved.</span>
         </div>
       </div>
     </div>

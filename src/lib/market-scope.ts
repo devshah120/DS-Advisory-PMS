@@ -11,7 +11,14 @@ export type Market = 'US' | 'INDIA';
 
 export const DEFAULT_MARKET: Market = 'US';
 
-/** Where the selected book is persisted, so a reload doesn't snap back to the US. */
+/**
+ * Where the selected book is persisted, so a reload doesn't snap back to the US.
+ *
+ * The 'atlas:' prefix is a leftover from the interim product name and is kept
+ * deliberately: it is a key already written into every user's browser, so
+ * renaming it would silently discard their saved market and snap the whole desk
+ * back to the US book on next load. Never displayed anywhere.
+ */
 export const MARKET_STORAGE_KEY = 'atlas:market';
 
 export interface MarketMeta {

@@ -21,7 +21,7 @@ function scoreTone(score: number) {
   return 'text-danger';
 }
 
-/** The Atlas Fundamental Score badge — hovering reveals the full pillar + per-metric breakdown that produced it. */
+/** The GGC Fundamental Score badge — hovering reveals the full pillar + per-metric breakdown that produced it. */
 export function ScoreHoverCard({ view }: { view: FundamentalView }) {
   const [open, setOpen] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

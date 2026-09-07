@@ -148,7 +148,7 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
             </p>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
               Historical returns and as-of-date reports need an opening baseline
-              (holdings + cash as of 30-June-2026, when Atlas started tracking
+              (holdings + cash as of 30-June-2026, when the system started tracking
               transactions) before anything can be reconstructed. This client&apos;s
               current holdings can be used to build one automatically.
             </p>

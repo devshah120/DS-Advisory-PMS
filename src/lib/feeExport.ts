@@ -47,7 +47,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   const money = currencyFormat(fee.currency);
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet('Fee Schedule', {

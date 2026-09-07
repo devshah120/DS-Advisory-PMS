@@ -11,6 +11,12 @@ import {
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
 import { useCurrency } from '@/components/layout/MarketContext';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
+import {
+  INCEPTION_ISO,
+  isUsableRange,
+  rangeHint,
+  todayIso,
+} from '@/lib/custom-range';
 
 const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
@@ -90,7 +96,7 @@ export function PeriodPerformance({
   const [period, setPeriod] = useState<string>('QTD');
   const [options, setOptions] = useState<PeriodOption[]>([]);
   const [customFrom, setCustomFrom] = useState<string>('');
-  const [customTo, setCustomTo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [customTo, setCustomTo] = useState<string>(todayIso);
 
   const [periodReturn, setPeriodReturn] = useState<PeriodReturn | null>(null);
   const [asOf, setAsOf] = useState<PortfolioAsOf | null>(null);
@@ -126,7 +132,17 @@ export function PeriodPerformance({
       setError(null);
       setNoBaseline(false);
 
-      if (period === 'CUSTOM' && !customFrom) {
+      /**
+       * Hold off while a custom range is still being typed.
+       *
+       * A native date input fires on every keystroke, so typing the year 2026
+       * passes through 0002 / 0020 / 0202 first. Fetching those asks the engine
+       * to measure from the year 26 AD, which it answers — correctly, and
+       * bafflingly — with a "36510 days short of the full window" warning while
+       * the user is still mid-keystroke. Waiting for a complete, in-range pair
+       * keeps the loaded window on screen until there is a real range to load.
+       */
+      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo)) {
         setPeriodReturn(null);
         setAsOf(null);
         setLoading(false);
@@ -213,6 +229,9 @@ export function PeriodPerformance({
     return out;
   }, [options]);
 
+  /** Why the range is not measurable yet, or null once it is. */
+  const customHint = period === 'CUSTOM' ? rangeHint(customFrom, customTo) : null;
+
   const selector = (
     <div className="flex flex-wrap items-end gap-3">
       <Select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Period">
@@ -232,19 +251,31 @@ export function PeriodPerformance({
       </Select>
       {period === 'CUSTOM' && (
         <>
+          {/* min/max bound BOTH the typed year and the calendar picker, so the
+              year 0026 that a half-typed "2026" produces is rejected by the
+              browser itself rather than sent to the engine and reported back as
+              a 36,510-day shortfall. */}
           <Input
             type="date"
             label="From"
             value={customFrom}
+            min={INCEPTION_ISO}
+            max={customTo || todayIso()}
             onChange={(e) => setCustomFrom(e.target.value)}
           />
           <Input
             type="date"
             label="To"
             value={customTo}
+            min={customFrom || INCEPTION_ISO}
+            max={todayIso()}
             onChange={(e) => setCustomTo(e.target.value)}
           />
         </>
+      )}
+      {/* Says "keep typing", not "error" — the range is incomplete, not wrong. */}
+      {period === 'CUSTOM' && customHint && (
+        <p className="w-full text-[12px] leading-relaxed text-ink-tertiary">{customHint}</p>
       )}
     </div>
   );
@@ -375,10 +406,11 @@ export function PeriodPerformance({
               </p>
             )}
           </>
-        ) : period === 'CUSTOM' && !customFrom ? (
-          <p className="mt-4 text-[13px] text-ink-tertiary">
-            Choose a &quot;From&quot; date to measure a custom range.
-          </p>
+        ) : customHint ? (
+          // Covers every not-yet-measurable state, not just an empty From: a
+          // half-typed year lands here too, so the card explains itself instead
+          // of going blank.
+          <p className="mt-4 text-[13px] text-ink-tertiary">{customHint}</p>
         ) : null}
       </Card>
 

@@ -457,7 +457,7 @@ export async function buildCapitalGainsWorkbook(
   report: CapitalGainsReport,
 ): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   summarySheet(wb, report);

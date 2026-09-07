@@ -224,7 +224,7 @@ export function buildClientHoldingsWorkbook(
   const plPercentColumn = columns.length - 1;
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Giriraj Global Capital';
+  wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
   const sheet = wb.addWorksheet(variant === 'family' ? 'Family Holdings' : 'Holdings', {
