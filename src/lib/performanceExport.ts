@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { PerformanceOk, PerformanceResponse } from './performance.api';
 import { PeriodReturn, PortfolioAsOf } from './portfolio-history.api';
+import { FamilyPeriodReturn } from './family-performance.api';
 
 /**
  * The client-facing Performance statement, laid out as the firm's reference
@@ -783,6 +784,268 @@ export async function downloadPeriodPerformanceWorkbook(
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `${name}-performance-${slug}-${pr.to.slice(0, 10)}.xlsx`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+/**
+ * The HOUSEHOLD statement — the same document as the single-client period
+ * statement, with a family as its subject and a member breakdown tab.
+ *
+ * Deliberately built on the same banner, identity block, panel and footer
+ * primitives rather than as a separate layout: a household statement and an
+ * individual one get read side by side in the same review, and a reader should
+ * not have to relearn the page between them.
+ */
+function familyLeftPanels(fr: FamilyPeriodReturn): Array<{ title: string; lines: Line[] }> {
+  return [
+    {
+      title: 'HOUSEHOLD OVER THE PERIOD',
+      lines: [
+        { label: 'Accounts', value: fr.memberCount, kind: 'text', input: true },
+        { label: 'Combined Opening Value', value: fr.openingValue, kind: 'money', input: true },
+        { label: 'Net Flows', value: fr.netFlows, kind: 'money', input: true },
+        { label: 'Combined Closing Value', value: fr.closingValue, kind: 'money', total: true },
+        {
+          label: 'Gain (net of flows)',
+          value: fr.closingValue - fr.openingValue - fr.netFlows,
+          kind: 'money',
+          total: true,
+        },
+        { label: 'Period Length (days)', value: fr.periodDays, kind: 'text', input: true },
+      ],
+    },
+  ];
+}
+
+function familyRightLines(fr: FamilyPeriodReturn): Line[] {
+  const lines: Line[] = [
+    { label: 'Household Return (XIRR)', value: rate(fr.returnPct), kind: 'percent' },
+    { label: 'Annualized Return', value: rate(fr.annualizedReturnPct), kind: 'percent' },
+    { label: 'Simple Return (recon.)', value: rate(fr.simpleReturnPct), kind: 'percent' },
+    {
+      label: 'Benchmark',
+      value: fr.benchmark?.name ?? fr.benchmark?.code ?? NOT_AVAILABLE,
+      kind: 'text',
+    },
+    { label: 'Benchmark Return', value: rate(fr.benchmark?.xirr), kind: 'percent' },
+    { label: 'Alpha', value: rate(fr.alpha), kind: 'percent' },
+  ];
+
+  if (fr.returnPct == null && fr.returnReason) {
+    lines.push({ label: 'Return unavailable', value: fr.returnReason, kind: 'text', input: true });
+  }
+  if (fr.benchmark && fr.benchmark.xirr == null && fr.benchmark.reason) {
+    lines.push({
+      label: 'Benchmark unavailable',
+      value: fr.benchmark.reason,
+      kind: 'text',
+      input: true,
+    });
+  }
+
+  return lines;
+}
+
+function familyTimeFrameLabel(fr: FamilyPeriodReturn): string {
+  const base = `${fr.label} (${fmtDate(new Date(fr.from))} → ${fmtDate(new Date(fr.to))})`;
+  if (fr.clampedToInception && fr.daysClamped > 0) {
+    const days = `${fr.daysClamped} day${fr.daysClamped === 1 ? '' : 's'}`;
+    return `${base} — opened at inception, ${days} short of the full window`;
+  }
+  return fr.openPeriod ? `${base} — period still open` : base;
+}
+
+export function buildFamilyPerformanceWorkbook(
+  fr: FamilyPeriodReturn,
+  currency: string,
+): ExcelJS.Workbook {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Giriraj Global Capital';
+  wb.created = new Date();
+
+  const sheet = wb.addWorksheet('Household Summary', {
+    views: [{ showGridLines: false, state: 'frozen', ySplit: 3 }],
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true },
+  });
+  sheet.columns = COL_WIDTHS.map((width) => ({ width }));
+
+  writeBanner(sheet);
+  writeIdentity(sheet, `${fr.familyName} (household)`, new Date(fr.to), familyTimeFrameLabel(fr));
+
+  const left = familyLeftPanels(fr);
+  const right = familyRightLines(fr);
+
+  writePanelHeader(sheet, PANEL_HEADER_ROW, 1, left[0].title);
+  writePanelHeader(sheet, PANEL_HEADER_ROW, 4, 'PERFORMANCE METRICS');
+
+  left[0].lines.forEach((line, i) => {
+    writeLine(sheet, FIRST_BODY_ROW + i, 1, line, i % 2 === 0 ? 'stone' : 'white', currency);
+  });
+  right.forEach((line, i) => {
+    writeLine(sheet, FIRST_BODY_ROW + i, 4, line, i % 2 === 0 ? 'stone' : 'white', currency);
+  });
+
+  const lastRow = Math.max(FIRST_BODY_ROW + left[0].lines.length, FIRST_BODY_ROW + right.length);
+
+  const notes: string[] = [];
+  // Said first, because it is the one thing about this statement that differs
+  // from the individual one it will be read beside.
+  notes.push(
+    'This household is measured as a single account: one money-weighted return solved over the ' +
+      'combined cash flows of every member, not an average of the member returns.',
+  );
+  if (fr.openPeriod) {
+    notes.push(
+      'This period has not closed. Figures are struck as at the date above and will change.',
+    );
+  }
+  if (fr.clampedToInception) {
+    const nominal = fr.nominalFrom ? fmtDate(new Date(fr.nominalFrom)) : 'its nominal start';
+    notes.push(
+      `The window opens at the 30-June-2026 inception rather than ${nominal}; returns cover the shortened period only.`,
+    );
+  }
+  for (const e of fr.lateEntrants) {
+    notes.push(
+      `${e.clientName} joined this household on ${fmtDate(new Date(e.entryDate))}. Its balance is ` +
+        'counted as capital arriving on that date, not as household performance.',
+    );
+  }
+  notes.push('All returns are money-weighted (XIRR) and measured over the selected period.');
+
+  writeFooter(sheet, lastRow + 1, currency, notes);
+
+  if (fr.members.length) writeMembersSheet(wb, fr, currency);
+
+  return wb;
+}
+
+/**
+ * The per-account breakdown, as its own tab.
+ *
+ * Off the summary sheet for the same reason the holdings table is: the summary
+ * is the page that actually gets read, and the household's headline figures
+ * should not compete with an eight-row account table for the top of it.
+ */
+function writeMembersSheet(wb: ExcelJS.Workbook, fr: FamilyPeriodReturn, currency: string): void {
+  const sheet = wb.addWorksheet('By Account', {
+    views: [{ showGridLines: false, state: 'frozen', ySplit: 2 }],
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true },
+  });
+
+  const headers: Array<{
+    label: string;
+    width: number;
+    kind: 'text' | 'number' | 'money' | 'percent';
+  }> = [
+    { label: 'Account', width: 30, kind: 'text' },
+    { label: 'Opening Value', width: 18, kind: 'money' },
+    { label: 'Net Flows', width: 16, kind: 'money' },
+    { label: 'Closing Value', width: 18, kind: 'money' },
+    { label: 'Weight', width: 12, kind: 'percent' },
+    { label: 'Gain', width: 18, kind: 'money' },
+    { label: 'Return (XIRR)', width: 16, kind: 'percent' },
+    { label: 'Note', width: 42, kind: 'text' },
+  ];
+
+  sheet.columns = headers.map((h) => ({ width: h.width }));
+
+  sheet.getRow(1).height = 22;
+  const titleCell = sheet.getCell(1, 1);
+  titleCell.value = `${fr.familyName} — ${fr.label}`;
+  titleCell.font = { name: FONT, size: 12, bold: true, color: { argb: INK } };
+  titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  sheet.getRow(2).height = 20;
+  headers.forEach((h, i) => {
+    const cell = sheet.getCell(2, i + 1);
+    cell.value = h.label;
+    cell.font = { name: FONT, size: 10, bold: true, color: { argb: WHITE } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
+    cell.border = BORDER;
+    cell.alignment = { horizontal: h.kind === 'text' ? 'left' : 'right', vertical: 'middle' };
+  });
+
+  const money = moneyFormat(currency);
+
+  const writeRow = (
+    r: number,
+    values: Array<number | string | null>,
+    style: { bold: boolean; fill: 'stone' | 'white' | 'gold' },
+  ) => {
+    sheet.getRow(r).height = style.bold ? 20 : 18;
+    values.forEach((v, i) => {
+      const cell = sheet.getCell(r, i + 1);
+      const kind = headers[i].kind;
+      // A null return is written as the literal, never as 0 — a 0.00% here
+      // would read as "measured, and flat", a different and false claim about
+      // an account whose return could not be solved.
+      cell.value = v === null ? NOT_AVAILABLE : v;
+      cell.font = { name: FONT, size: 10, bold: style.bold, color: { argb: INK } };
+      cell.fill =
+        style.fill === 'gold'
+          ? { type: 'pattern', pattern: 'solid', fgColor: { argb: GOLD_FILL } }
+          : bandFill(style.fill);
+      cell.border = BORDER;
+      cell.alignment = { horizontal: kind === 'text' ? 'left' : 'right', vertical: 'middle' };
+      if (typeof v === 'number') {
+        if (kind === 'money') cell.numFmt = money;
+        if (kind === 'percent') cell.numFmt = '0.00%';
+        if (kind === 'number') cell.numFmt = '#,##0.####';
+      }
+    });
+  };
+
+  fr.members.forEach((m, idx) => {
+    writeRow(
+      3 + idx,
+      [
+        m.clientName,
+        m.openingValue,
+        m.netFlows,
+        m.closingValue,
+        m.weight,
+        m.gain,
+        m.returnPct,
+        m.returnReason ?? '',
+      ],
+      { bold: false, fill: idx % 2 === 0 ? 'stone' : 'white' },
+    );
+  });
+
+  // The household line, so this tab reconciles on its own without the reader
+  // having to flip back to the summary sheet to check it.
+  writeRow(
+    3 + fr.members.length,
+    [
+      'Household',
+      fr.openingValue,
+      fr.netFlows,
+      fr.closingValue,
+      1,
+      fr.closingValue - fr.openingValue - fr.netFlows,
+      fr.returnPct,
+      'Solved over the combined flows, not averaged',
+    ],
+    { bold: true, fill: 'gold' },
+  );
+}
+
+export async function downloadFamilyPerformanceWorkbook(
+  fr: FamilyPeriodReturn,
+  currency: string,
+): Promise<void> {
+  const wb = buildFamilyPerformanceWorkbook(fr, currency);
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const slug = fr.label.replace(/[^\w]+/g, '-').toLowerCase();
+  const name = fr.familyName.replace(/\s+/g, '_').toLowerCase();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${name}-household-performance-${slug}-${fr.to.slice(0, 10)}.xlsx`;
   link.click();
   URL.revokeObjectURL(link.href);
 }

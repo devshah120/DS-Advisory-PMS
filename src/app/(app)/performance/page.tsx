@@ -12,13 +12,15 @@ import {
   Wallet,
 } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
+import { familiesApi } from '@/lib/families.api';
+import { FamilyPeriodReturn } from '@/lib/family-performance.api';
 import {
   performanceApi,
   PerformanceMeta,
   PerformanceOk,
   PerformanceResponse,
 } from '@/lib/performance.api';
-import { Client } from '@/types';
+import { Client, Family } from '@/types';
 import {
   cn,
   formatCompactCurrency,
@@ -42,6 +44,11 @@ import {
   PeriodSheetState,
 } from '@/components/performance/PeriodPerformance';
 import {
+  FamilyPerformance,
+  FamilySheetState,
+} from '@/components/performance/FamilyPerformance';
+import {
+  downloadFamilyPerformanceWorkbook,
   downloadPerformanceWorkbook,
   downloadPeriodPerformanceWorkbook,
 } from '@/lib/performanceExport';
@@ -57,10 +64,31 @@ export default function PerformancePage() {
   const currency = useCurrency();
 
   const [clients, setClients] = useState<Client[] | null>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [families, setFamilies] = useState<Family[]>([]);
+  /**
+   * What the sheet is measuring: one mandate, or one household.
+   *
+   * A single selector rather than a page-level tab, because "the Salecha family"
+   * and "Prashant Salecha" are the same KIND of question asked at two levels —
+   * a reviewer moves between them constantly, and a tab would make that a
+   * navigation act rather than a change of subject. Encoded as one id with a
+   * kind so the two can never both be set.
+   */
+  const [subject, setSubject] = useState<
+    { kind: 'client'; id: string } | { kind: 'family'; id: string } | null
+  >(null);
   const [result, setResult] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const clientId = subject?.kind === 'client' ? subject.id : null;
+  const familyId = subject?.kind === 'family' ? subject.id : null;
+
+  /** Mirrored up from the household sheet, same contract as the client one. */
+  const [familyState, setFamilyState] = useState<FamilySheetState>({
+    periodReturn: null,
+    loading: true,
+  });
 
   /**
    * The period sheet's currently-loaded window, mirrored up from the child.
@@ -90,20 +118,37 @@ export default function PerformancePage() {
     if (!marketReady) return;
     (async () => {
       try {
-        const list = await clientsApi.list({ limit: 200, market });
+        /**
+         * Households are fetched beside the mandates, and a failure to load
+         * them is not allowed to take the page down with it: a manager with no
+         * families configured, or an older deployment, must still get their
+         * individual sheets. The selector simply shows no household group.
+         */
+        const [list, familyList] = await Promise.all([
+          clientsApi.list({ limit: 200, market }),
+          familiesApi.list(market).catch(() => [] as Family[]),
+        ]);
         setClients(list);
-        // Always select the new book's first client rather than preserving the
+        setFamilies(familyList);
+
+        // Always select the new book's first subject rather than preserving the
         // previous id — that id belongs to the other book and would render one
         // book's performance under the other's currency.
-        if (list.length) setClientId(list[0].id);
+        //
+        // Households come first when the book has any, because the aggregate is
+        // the level a review opens on; the individual accounts are one
+        // selection away rather than the default.
+        if (familyList.length) setSubject({ kind: 'family', id: familyList[0].id });
+        else if (list.length) setSubject({ kind: 'client', id: list[0].id });
         else {
-          setClientId(null);
+          setSubject(null);
           setResult(null);
           setLoading(false);
         }
       } catch {
         toast({ tone: 'error', title: 'Could not load clients' });
         setClients([]);
+        setFamilies([]);
         setLoading(false);
       }
     })();
@@ -128,6 +173,13 @@ export default function PerformancePage() {
   );
 
   useEffect(() => {
+    // A household is served entirely by its own sheet, which fetches per
+    // window like the period sheet does — so the since-inception call is not
+    // made for one at all.
+    if (familyId) {
+      setLoading(false);
+      return;
+    }
     if (!clientId) return;
     // The period sheet fetches its own data per selected window, so the
     // since-inception call is skipped entirely on that path rather than being
@@ -138,12 +190,19 @@ export default function PerformancePage() {
     }
     setLoading(true);
     load(clientId as string);
-  }, [clientId, load, usePeriodSheet]);
+  }, [clientId, familyId, load, usePeriodSheet]);
 
   const client = useMemo(
     () => clients?.find((c) => c.id === clientId) ?? null,
     [clients, clientId],
   );
+  const family = useMemo(
+    () => families.find((f) => f.id === familyId) ?? null,
+    [families, familyId],
+  );
+
+  /** Bumped by Refresh; the household sheet reloads when it changes. */
+  const [familyRefresh, setFamilyRefresh] = useState(0);
 
   /**
    * Refresh means the same thing on both books — reload what is on screen —
@@ -151,9 +210,17 @@ export default function PerformancePage() {
    * here, so it is reloaded here; the period sheet fetches per window, so it is
    * told to reload through the signal it already listens on.
    */
-  const refreshBusy = usePeriodSheet ? periodState.loading : refreshing;
+  const refreshBusy = familyId
+    ? familyState.loading
+    : usePeriodSheet
+      ? periodState.loading
+      : refreshing;
 
   const handleRefresh = useCallback(() => {
+    if (familyId) {
+      setFamilyRefresh((t) => t + 1);
+      return;
+    }
     if (!clientId) return;
     if (usePeriodSheet) {
       setPeriodRefresh((t) => t + 1);
@@ -161,7 +228,7 @@ export default function PerformancePage() {
     }
     setRefreshing(true);
     load(clientId);
-  }, [clientId, usePeriodSheet, load]);
+  }, [clientId, familyId, usePeriodSheet, load]);
 
   /**
    * Export is disabled until there is a real, computed sheet behind it. On the
@@ -169,14 +236,19 @@ export default function PerformancePage() {
    * period the solver could not price would produce a statement of blanks that
    * still looks like a statement.
    */
-  const exportDisabled = usePeriodSheet
-    ? periodState.loading || !periodState.periodReturn
-    : !result || result.data.status !== 'ok';
+  const exportDisabled = familyId
+    ? familyState.loading || !familyState.periodReturn
+    : usePeriodSheet
+      ? periodState.loading || !periodState.periodReturn
+      : !result || result.data.status !== 'ok';
 
   const handleExport = useCallback(async () => {
     const name = client?.name ?? 'Client';
     try {
-      if (usePeriodSheet) {
+      if (familyId) {
+        if (!familyState.periodReturn) return;
+        await downloadFamilyPerformanceWorkbook(familyState.periodReturn, currency);
+      } else if (usePeriodSheet) {
         if (!periodState.periodReturn) return;
         await downloadPeriodPerformanceWorkbook(
           name,
@@ -192,28 +264,58 @@ export default function PerformancePage() {
       toast({ tone: 'error', title: 'Could not build the report' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usePeriodSheet, periodState, result, client, currency]);
+  }, [familyId, familyState, usePeriodSheet, periodState, result, client, currency]);
 
   usePageHeading({
     title: 'Performance',
-    subtitle: usePeriodSheet
-      ? 'Transactional XIRR, measured over the period you select'
-      : result
-        ? result.meta.method
-        : 'Money-weighted returns, benchmark comparison and attribution',
+    subtitle: familyId
+      ? 'The household measured as one account, over the period you select'
+      : usePeriodSheet
+        ? 'Transactional XIRR, measured over the period you select'
+        : result
+          ? result.meta.method
+          : 'Money-weighted returns, benchmark comparison and attribution',
     actions: (
       <>
-        {clients && clients.length > 0 && (
+        {/**
+          * One selector, two groups. A household and a mandate are the same
+          * question at two levels, so switching between them is a change of
+          * subject in the same control rather than a move to a different page —
+          * which is what makes "check the family, then check who moved it" a
+          * single gesture instead of a navigation.
+          *
+          * The value is prefixed by kind because a family id and a client id
+          * are both opaque cuids: without the prefix the page could not tell
+          * which of the two lists a selection came from.
+          */}
+        {((clients && clients.length > 0) || families.length > 0) && (
           <Select
-            value={clientId || ''}
-            onChange={(e) => setClientId(e.target.value)}
-            aria-label="Client"
+            value={subject ? `${subject.kind}:${subject.id}` : ''}
+            onChange={(e) => {
+              const [kind, id] = e.target.value.split(':');
+              if (kind === 'family' || kind === 'client') setSubject({ kind, id });
+            }}
+            aria-label="Client or household"
           >
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            {families.length > 0 && (
+              <optgroup label="Households">
+                {families.map((f) => (
+                  <option key={f.id} value={`family:${f.id}`}>
+                    {f.name} · {f.memberCount}{' '}
+                    {f.memberCount === 1 ? 'account' : 'accounts'}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {clients && clients.length > 0 && (
+              <optgroup label={families.length > 0 ? 'Individual accounts' : 'Accounts'}>
+                {clients.map((c) => (
+                  <option key={c.id} value={`client:${c.id}`}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </Select>
         )}
         {/* Both books get Export and Refresh; only what they act on differs.
@@ -233,7 +335,7 @@ export default function PerformancePage() {
         <Button
           size="md"
           leftIcon={<RefreshCw className={cn('h-4 w-4', refreshBusy && 'animate-spin')} />}
-          disabled={!clientId || refreshBusy}
+          disabled={!subject || refreshBusy}
           onClick={handleRefresh}
         >
           Refresh
@@ -253,10 +355,17 @@ export default function PerformancePage() {
     <>
       {loading ? (
         <SheetSkeleton />
-      ) : !clients?.length ? (
+      ) : !clients?.length && !families.length ? (
         <EmptyState
           title="No clients yet"
           description="Add a client and their performance sheet appears here."
+        />
+      ) : familyId ? (
+        <FamilyPerformance
+          key={familyId}
+          familyId={familyId}
+          refreshSignal={familyRefresh}
+          onStateChange={setFamilyState}
         />
       ) : usePeriodSheet ? (
         clientId && (

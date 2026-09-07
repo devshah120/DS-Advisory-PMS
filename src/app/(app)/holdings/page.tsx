@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Briefcase,
   TrendingUp,
   Layers,
@@ -21,6 +22,8 @@ import { apiClient } from '@/lib/api';
 import { clientsApi } from '@/lib/clients.api';
 import { holdingsApi, type BulkImportSummary } from '@/lib/holdings.api';
 import { familiesApi } from '@/lib/families.api';
+import { classificationApi } from '@/lib/classification.api';
+import { SectorAssignCell } from '@/components/holdings/SectorAssignCell';
 import {
   downloadClientHoldingsWorkbook,
   downloadFamilyHoldingsWorkbook,
@@ -173,6 +176,23 @@ interface SymbolNonHolderRow {
  */
 const CLOSED_POSITION_EPSILON = 1e-9;
 
+/**
+ * The labels that mean "nobody has classified this yet".
+ *
+ * More than one spelling reaches the UI: the API writes 'Unclassified', this
+ * page's own rollups fall back to 'Uncategorized', and older provider rows can
+ * carry 'Unknown'. They all denote the same absent decision, so the drill-down
+ * must recognise every one of them or the classify control would fail to appear
+ * on exactly the bucket it exists for. Mirrors `isUnclassified` on the server.
+ */
+const UNCLASSIFIED_SECTOR_KEYS = new Set([
+  'unclassified',
+  'uncategorized',
+  'unknown',
+  'n/a',
+  '-',
+]);
+
 function openPositions<T extends { quantity: number }>(rows: T[]): T[] {
   if (!Array.isArray(rows)) return [];
   return rows.filter((h) => Math.abs(Number(h.quantity) || 0) > CLOSED_POSITION_EPSILON);
@@ -197,6 +217,15 @@ export default function HoldingsPage() {
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
   const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
   const [activeSymbol, setActiveSymbol] = useState<SymbolRow | null>(null);
+
+  /**
+   * The sector vocabulary offered when classifying an unlabelled position.
+   *
+   * Served by the API rather than hardcoded here so the list the UI offers and
+   * the list the server validates against cannot drift — a sector this page
+   * offered but the server rejected would be a dead option in the dropdown.
+   */
+  const [sectorOptions, setSectorOptions] = useState<string[]>([]);
 
   // --- families (households) ---
   /** The book's households, listed beside individual clients in the By Client tab. */
@@ -263,6 +292,20 @@ export default function HoldingsPage() {
   }
 
   /**
+   * The sector vocabulary. A failure here simply leaves the classify dropdown
+   * unavailable — the holdings table, which is what this page is for, is
+   * unaffected.
+   */
+  async function loadSectorOptions() {
+    try {
+      const q = await classificationApi.unclassified(market);
+      setSectorOptions(q.sectors);
+    } catch {
+      setSectorOptions([]);
+    }
+  }
+
+  /**
    * The book's households. A failure here leaves the client table showing
    * individual mandates only — the page's primary job — rather than failing.
    */
@@ -282,6 +325,7 @@ export default function HoldingsPage() {
     loadHoldings();
     loadClients();
     loadFamilies();
+    loadSectorOptions();
     // A household from the previous book must not stay open across a switch.
     setActiveFamily(null);
     setFamilyAggregate(null);
@@ -670,6 +714,17 @@ export default function HoldingsPage() {
       .map((r) => ({ ...r, weight: total ? (r.marketValue / total) * 100 : 0 }))
       .sort((a, b) => b.marketValue - a.marketValue);
   }, [holdings]);
+
+  /**
+   * The unclassified bucket, if the book still has one.
+   *
+   * Pulled out of the rollup rather than recomputed so the banner and the table
+   * row can never disagree about its size.
+   */
+  const unclassifiedRow = useMemo(
+    () => sectorRows.find((r) => UNCLASSIFIED_SECTOR_KEYS.has(r.sector.toLowerCase())) ?? null,
+    [sectorRows],
+  );
 
   /** Positions belonging to the client opened in the drill-down drawer. */
   const clientPositions: ClientPositionRow[] = useMemo(() => {
@@ -1225,6 +1280,34 @@ export default function HoldingsPage() {
     },
   ];
 
+  /**
+   * Reflect a completed classification into the page without a full refetch.
+   *
+   * The row is updated in place so it leaves the unclassified bucket
+   * immediately — the drawer's own list, the sector rollup behind it and the
+   * pie all read off `holdings`, so mutating that one array keeps every view
+   * consistent in a single step. A background reload then reconciles with the
+   * server, which also picks up any row this manager does not own.
+   */
+  function handleSectorAssigned(symbol: string, sector: string) {
+    setHoldings((prev) =>
+      prev.map((h) => (h.ticker === symbol ? { ...h, sector } : h)),
+    );
+    loadHoldings();
+  }
+
+  /**
+   * True when the open drill-down is the unclassified bucket itself.
+   *
+   * The classify control is added to the table only in that case: on a real
+   * sector's drawer every row already has an answer, and offering a
+   * "Set sector" dropdown there would invite re-labelling by accident while
+   * reading. Fixing a WRONG sector is a different job from filling a MISSING
+   * one, and this drawer is the one about missing.
+   */
+  const inUnclassifiedDrawer =
+    !!activeSector && UNCLASSIFIED_SECTOR_KEYS.has(activeSector.sector.toLowerCase());
+
   const sectorPositionColumns: Column<SectorPositionRow>[] = [
     { key: 'srNo', header: 'Sr No', accessor: (r) => r.srNo, align: 'center', width: '64px' },
     {
@@ -1288,6 +1371,31 @@ export default function HoldingsPage() {
         </div>
       ),
     },
+    // Only in the unclassified drawer — see `inUnclassifiedDrawer`.
+    ...(inUnclassifiedDrawer
+      ? [
+          {
+            key: 'assignSector',
+            header: 'Set sector',
+            accessor: (r: SectorPositionRow) => r.symbol,
+            sortable: false,
+            // Chrome, not data: a dropdown has no meaning in a CSV, and the
+            // column-visibility menu should not offer to hide the control the
+            // drawer exists to present.
+            meta: true,
+            render: (r: SectorPositionRow) => (
+              <SectorAssignCell
+                symbol={r.symbol}
+                sectors={sectorOptions}
+                holderCount={
+                  holdings.filter((h) => h.ticker === r.symbol).length
+                }
+                onAssigned={handleSectorAssigned}
+              />
+            ),
+          } as Column<SectorPositionRow>,
+        ]
+      : []),
   ];
 
   const symbolHolderColumns: Column<SymbolHolderRow>[] = [
@@ -1602,6 +1710,32 @@ export default function HoldingsPage() {
         )}
 
         {view === 'sectors' && (
+          <>
+            {/* The prompt to clear the bucket, shown only while one exists.
+                An unclassified wedge is not a finding about the portfolio, it
+                is unfinished data entry — so it is surfaced as a task with the
+                way to complete it, rather than charted as though it were a real
+                allocation. It disappears the moment the queue is empty. */}
+            {unclassifiedRow && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <p className="text-[13px] leading-relaxed text-amber-900">
+                    <span className="font-semibold">
+                      {formatPct(unclassifiedRow.weight)} of the book has no sector
+                    </span>{' '}
+                    — {unclassifiedRow.positions} position
+                    {unclassifiedRow.positions === 1 ? '' : 's'} worth{' '}
+                    {formatCurrency(unclassifiedRow.marketValue, currency)}. Until these are
+                    classified they distort every sector allocation and comparison on this
+                    book.
+                  </p>
+                </div>
+                <Button size="sm" onClick={() => setActiveSector(unclassifiedRow)}>
+                  Classify now
+                </Button>
+              </div>
+            )}
           <DataTable
             columns={sectorColumns}
             data={sectorRows}
@@ -1614,6 +1748,7 @@ export default function HoldingsPage() {
               toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
             }}
           />
+          </>
         )}
 
         {view === 'all' && (
