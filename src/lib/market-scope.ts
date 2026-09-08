@@ -26,6 +26,14 @@ export interface MarketMeta {
   label: string;
   /** Short form for the header button, where horizontal space is tight. */
   shortLabel: string;
+  /**
+   * Kept for non-visual uses (report titles, exported filenames) only.
+   *
+   * Do NOT render this in the UI: it is a regional indicator pair, and Windows
+   * has no font that composes one into a flag, so Chrome and Edge there draw the
+   * bare letters "US"/"IN" instead. Use <FlagIcon market={code} />, which draws
+   * the flag as SVG and looks the same everywhere.
+   */
   flag: string;
   currency: string;
   /**

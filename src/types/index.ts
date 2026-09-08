@@ -349,14 +349,42 @@ export interface BenchmarkReturns extends WatchlistReturns {
   symbol: string;
 }
 
-export type PortfolioEventType = 'EARNINGS' | 'DIVIDEND' | 'SPLIT';
+/**
+ * The Event Center's event kinds.
+ *
+ * EARNINGS/DIVIDEND/SPLIT come from the Yahoo calendar; the rest come from the
+ * Corporate Action Engine (PART 29's filter list). SPLIT and DIVIDEND are
+ * shared between the two sources deliberately — a split is a split whichever
+ * subsystem noticed it, and giving the engine its own parallel kinds would
+ * split one filter into two for no reason the advisor would recognise.
+ */
+export type PortfolioEventType =
+  | 'EARNINGS'
+  | 'DIVIDEND'
+  | 'SPLIT'
+  | 'BONUS'
+  | 'RIGHTS'
+  | 'MERGER'
+  | 'TICKER_CHANGE'
+  | 'OTHER_CORPORATE_ACTION';
 
 export interface PortfolioEvent {
   ticker: string;
   company: string;
   clientCount: number;
   type: PortfolioEventType;
-  code: 'E' | 'D' | 'C';
+  /** PART 54's badge letters: E, D, S, B, R, M, T, C. */
+  code: string;
+  /**
+   * Set only on rows from the Corporate Action Engine — the Yahoo calendar
+   * rows have no action behind them to open. Presence of this field is what
+   * makes a row clickable through to the Review Center.
+   */
+  corporateActionId?: string;
+  corporateActionStatus?: string;
+  /** Ratio or per-share amount, already formatted ('2:1', '$1.00/share'). */
+  detail?: string | null;
+  source?: string;
   label: string;
   date: string;
   status: 'Upcoming' | 'Confirmed';

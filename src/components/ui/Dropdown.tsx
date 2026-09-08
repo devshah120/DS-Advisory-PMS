@@ -5,7 +5,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 export interface MenuItemDef {
-  label: string;
+  /**
+   * ReactNode, not string, so an item can lead with something drawn rather than
+   * typed — the market switcher puts an SVG flag beside the country name, which
+   * cannot be expressed by concatenating into a label string.
+   */
+  label: ReactNode;
   icon?: ReactNode;
   onClick?: () => void;
   tone?: 'default' | 'danger';

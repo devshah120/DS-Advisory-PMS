@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { TrendingUp, Coins, Split, RefreshCw } from 'lucide-react';
+import {
+  TrendingUp,
+  Coins,
+  Split,
+  RefreshCw,
+  Gift,
+  Ticket,
+  Combine,
+  Tag,
+  FileText,
+} from 'lucide-react';
 import { eventsApi } from '@/lib/events.api';
 import { formatCurrency, formatDate, formatNumber, cn } from '@/lib/utils';
 import { displayTicker } from '@/lib/market-scope';
@@ -14,18 +24,40 @@ import { exportToCsv } from '@/components/ui';
 
 const TYPE_META: Record<
   PortfolioEventType,
-  { label: string; icon: typeof TrendingUp; tone: 'brand' | 'success' | 'info' }
+  {
+    label: string;
+    icon: typeof TrendingUp;
+    tone: 'brand' | 'success' | 'info' | 'warning' | 'neutral';
+  }
 > = {
   EARNINGS: { label: 'Earnings', icon: TrendingUp, tone: 'brand' },
   DIVIDEND: { label: 'Dividend Ex-Date', icon: Coins, tone: 'success' },
   SPLIT: { label: 'Stock Split', icon: Split, tone: 'info' },
+  // Corporate Action Engine kinds (PART 29/54).
+  BONUS: { label: 'Bonus Issue', icon: Gift, tone: 'info' },
+  RIGHTS: { label: 'Rights Issue', icon: Ticket, tone: 'warning' },
+  MERGER: { label: 'Merger / Acquisition', icon: Combine, tone: 'warning' },
+  TICKER_CHANGE: { label: 'Ticker Change', icon: Tag, tone: 'neutral' },
+  OTHER_CORPORATE_ACTION: { label: 'Corporate Action', icon: FileText, tone: 'neutral' },
 };
 
+/**
+ * PART 29's filter list.
+ *
+ * "Splits" and "Corporate actions" are separate entries now that the engine
+ * feeds this page: a split is the common case an advisor scans for daily,
+ * while mergers and delistings are rarer and warrant their own look.
+ */
 const TYPE_FILTERS: Array<{ value: PortfolioEventType | 'ALL'; label: string }> = [
   { value: 'ALL', label: 'All events' },
   { value: 'EARNINGS', label: 'Earnings' },
   { value: 'DIVIDEND', label: 'Dividends' },
-  { value: 'SPLIT', label: 'Corporate actions' },
+  { value: 'SPLIT', label: 'Splits' },
+  { value: 'BONUS', label: 'Bonus' },
+  { value: 'RIGHTS', label: 'Rights' },
+  { value: 'MERGER', label: 'M&A' },
+  { value: 'TICKER_CHANGE', label: 'Ticker Changes' },
+  { value: 'OTHER_CORPORATE_ACTION', label: 'Other' },
 ];
 
 /** Reads the inferred payout count back as the word an advisor would use. */

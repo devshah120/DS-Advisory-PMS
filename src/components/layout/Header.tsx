@@ -19,6 +19,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
+import { FlagIcon } from '@/components/ui/FlagIcon';
 import { type UserProfile } from '@/lib/users.api';
 import { useSession } from './SessionContext';
 import { cn } from '@/lib/utils';
@@ -121,7 +122,12 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
         items={ALL_MARKETS.map((code) => {
           const m = MARKET_META[code];
           return {
-            label: `${m.flag}  ${m.label}`,
+            label: (
+              <span className="flex items-center gap-2.5">
+                <FlagIcon market={code} />
+                {m.label}
+              </span>
+            ),
             icon:
               code === market ? (
                 <Check className="h-4 w-4 text-brand" />
@@ -136,7 +142,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
             className="flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
             title={`Showing the ${meta.label} book (${meta.currency})`}
           >
-            <span className="text-[15px] leading-none">{meta.flag}</span>
+            <FlagIcon market={market} />
             <span className="hidden sm:inline">{meta.shortLabel}</span>
             <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
           </button>

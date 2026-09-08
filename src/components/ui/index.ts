@@ -15,6 +15,7 @@ export { AnimatedNumber } from './AnimatedNumber';
 export { Accordion } from './Accordion';
 export type { AccordionItem } from './Accordion';
 export { Dropdown } from './Dropdown';
+export { FlagIcon } from './FlagIcon';
 export type { MenuItemDef } from './Dropdown';
 export { DataTable, exportToCsv } from './DataTable';
 export type { Column } from './DataTable';

@@ -19,6 +19,7 @@ import {
   NavItem,
 } from '@/lib/navigation';
 import { useSession } from './SessionContext';
+import { BrandMark } from './BrandMark';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
@@ -56,17 +57,7 @@ export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps)
     >
       {/* Brand */}
       <div className="flex h-16 items-center gap-3 px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-brand to-brand-active shadow-sm">
-          <svg viewBox="0 0 24 24" className="h-5 w-5 text-white" fill="none">
-            <path
-              d="M12 3L4 7.5v9L12 21l8-4.5v-9L12 3z"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-            />
-            <path d="M12 3v18M4 7.5l8 4.5 8-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-          </svg>
-        </div>
+        <BrandMark size={36} />
         <AnimatePresence>
           {!collapsed && (
             <motion.div
