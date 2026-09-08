@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PanelLeftClose, PanelLeft, ChevronRight } from 'lucide-react';
-import { navSectionsFor, settingsItem, NavItem } from '@/lib/navigation';
+import { navSectionsFor, NavItem } from '@/lib/navigation';
 import { useSession } from './SessionContext';
 import { BrandMark } from './BrandMark';
 import { cn } from '@/lib/utils';
@@ -62,14 +62,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             ))}
           </SidebarGroup>
         ))}
-
-        <div className="space-y-0.5">
-          <SidebarLink
-            item={settingsItem}
-            active={isActive(settingsItem.href)}
-            collapsed={collapsed}
-          />
-        </div>
       </nav>
 
       {/* Footer */}
