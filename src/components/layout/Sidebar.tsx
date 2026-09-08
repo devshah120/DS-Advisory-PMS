@@ -2,52 +2,27 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  PanelLeftClose,
-  PanelLeft,
-  Search,
-  LogOut,
-  ChevronRight,
-} from 'lucide-react';
-import {
-  navSectionsFor,
-  settingsItem,
-  allNavItems,
-  visibleFor,
-  NavItem,
-} from '@/lib/navigation';
+import { PanelLeftClose, PanelLeft, ChevronRight } from 'lucide-react';
+import { navSectionsFor, settingsItem, NavItem } from '@/lib/navigation';
 import { useSession } from './SessionContext';
 import { BrandMark } from './BrandMark';
 import { cn } from '@/lib/utils';
 
 interface SidebarProps {
-  onLogout: () => void;
   collapsed: boolean;
   onToggle: () => void;
 }
 
-export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const { role } = useSession();
-  const [query, setQuery] = useState('');
-  const [searchFocused, setSearchFocused] = useState(false);
 
   const isActive = (href: string) => pathname === href;
 
-  // Role-gated items (currently just Users) are dropped for everyone else. The
-  // nav search is filtered by the same rule, so a hidden page can't be reached
-  // by typing its name either.
+  // Role-gated items (currently just Users) are dropped for everyone else.
   const sections = useMemo(() => navSectionsFor(role), [role]);
-
-  const filtered = useMemo(() => {
-    if (!query.trim()) return null;
-    const q = query.toLowerCase();
-    return visibleFor(allNavItems, role).filter((i) =>
-      i.label.toLowerCase().includes(q)
-    );
-  }, [query, role]);
 
   return (
     <motion.aside
@@ -73,84 +48,36 @@ export default function Sidebar({ onLogout, collapsed, onToggle }: SidebarProps)
         </AnimatePresence>
       </div>
 
-      {/* Search */}
-      {!collapsed && (
-        <div className="px-3 pb-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-tertiary" />
-            <input
-              type="search"
-              name="sidebar-nav-search"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              readOnly={!searchFocused}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search navigation"
-              className="h-9 w-full rounded-[10px] border border-border bg-surface-2 pl-9 pr-3 text-[13px] text-ink placeholder:text-ink-tertiary focus:border-brand focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand/15"
-            />
-          </div>
-        </div>
-      )}
-
       {/* Scroll area */}
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        {filtered ? (
-          <SidebarGroup collapsed={collapsed} title="Results">
-            {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-[13px] text-ink-tertiary">No matches</p>
-            ) : (
-              filtered.map((item) => (
-                <SidebarLink key={item.label} item={item} active={isActive(item.href)} collapsed={collapsed} />
-              ))
-            )}
-          </SidebarGroup>
-        ) : (
-          <>
-            {sections.map((section) => (
-              <SidebarGroup key={section.title} collapsed={collapsed} title={section.title}>
-                {section.items.map((item) => (
-                  <SidebarLink
-                    key={section.title + item.label}
-                    item={item}
-                    active={isActive(item.href)}
-                    collapsed={collapsed}
-                  />
-                ))}
-              </SidebarGroup>
-            ))}
-
-            <div className="space-y-0.5">
+        {sections.map((section) => (
+          <SidebarGroup key={section.title} collapsed={collapsed} title={section.title}>
+            {section.items.map((item) => (
               <SidebarLink
-                item={settingsItem}
-                active={isActive(settingsItem.href)}
+                key={section.title + item.label}
+                item={item}
+                active={isActive(item.href)}
                 collapsed={collapsed}
               />
-            </div>
-          </>
-        )}
+            ))}
+          </SidebarGroup>
+        ))}
+
+        <div className="space-y-0.5">
+          <SidebarLink
+            item={settingsItem}
+            active={isActive(settingsItem.href)}
+            collapsed={collapsed}
+          />
+        </div>
       </nav>
 
       {/* Footer */}
       <div className="border-t border-border p-3">
         <button
-          onClick={onLogout}
-          className={cn(
-            'mt-1 flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-danger-soft hover:text-danger',
-            collapsed && 'justify-center px-0'
-          )}
-        >
-          <LogOut className="h-4.5 w-4.5 shrink-0" />
-          {!collapsed && <span>Sign out</span>}
-        </button>
-
-        <button
           onClick={onToggle}
           className={cn(
-            'mt-2 flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-[13px] font-medium text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink',
+            'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-[13px] font-medium text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink',
             collapsed && 'justify-center px-0'
           )}
         >
