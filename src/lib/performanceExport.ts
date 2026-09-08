@@ -21,17 +21,17 @@ import { FamilyPeriodReturn } from './family-performance.api';
 const FONT = 'Arial';
 
 /** The firm's palette, as sampled from the reference workbook. */
-const NAVY = 'FF0B1F3A';
+export const NAVY = 'FF0B1F3A';
 const NAVY_LIGHT = 'FF16305C';
-const GOLD_TEXT = 'FFC9A227';
-const GOLD_FILL = 'FFF4E9C7';
-const STONE = 'FFF7F5F0';
+export const GOLD_TEXT = 'FFC9A227';
+export const GOLD_FILL = 'FFF4E9C7';
+export const STONE = 'FFF7F5F0';
 const WHITE = 'FFFFFFFF';
-const GREY_TEXT = 'FF5B6472';
-const INK = 'FF1A1A1A';
+export const GREY_TEXT = 'FF5B6472';
+export const INK = 'FF1A1A1A';
 /** Calculated figures read blue; input/derived-from-ledger figures read near-black. */
-const CALC_BLUE = 'FF1F4E9C';
-const HAIRLINE = 'FFD9D9D9';
+export const CALC_BLUE = 'FF1F4E9C';
+export const HAIRLINE = 'FFD9D9D9';
 
 const BORDER: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: HAIRLINE } },
@@ -64,7 +64,7 @@ const bandFill = (band: Band): ExcelJS.Fill => ({
  * the number format and, with it, how the value is read — money, a rate, a
  * plain string (a benchmark code), or a date.
  */
-interface Line {
+export interface Line {
   label: string;
   value: number | string | Date | null;
   kind: 'money' | 'percent' | 'percentPlain' | 'text' | 'date';
@@ -86,10 +86,10 @@ interface Line {
  * left blank or zeroed: an empty cell reads as "nothing happened" and a 0.0%
  * reads as "we measured this and it was zero", when the truth is neither.
  */
-const NOT_AVAILABLE = 'Not available';
+export const NOT_AVAILABLE = 'Not available';
 
 /** Renders a nullable engine rate as either its number or the n/a text. */
-function rate(v: number | null | undefined): number | string {
+export function rate(v: number | null | undefined): number | string {
   return v ?? NOT_AVAILABLE;
 }
 
@@ -105,7 +105,7 @@ function timeFrameLabel(data: PerformanceOk, asOf: Date): string {
   return `Since Inception (${fmtDate(from)} → ${fmtDate(asOf)})`;
 }
 
-function fmtDate(d: Date): string {
+export function fmtDate(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
@@ -450,7 +450,7 @@ export async function downloadPerformanceWorkbook(
  * fewer days than its name implies, and the reader is entitled to know that
  * from the statement itself rather than only from the screen.
  */
-function periodTimeFrameLabel(pr: PeriodReturn): string {
+export function periodTimeFrameLabel(pr: PeriodReturn): string {
   const base = `${pr.label} (${fmtDate(new Date(pr.from))} → ${fmtDate(new Date(pr.to))})`;
   if (pr.clampedToInception && pr.daysClamped > 0) {
     const days = `${pr.daysClamped} day${pr.daysClamped === 1 ? '' : 's'}`;
@@ -464,7 +464,7 @@ function periodTimeFrameLabel(pr: PeriodReturn): string {
  * in that order because that is the arithmetic the reader is checking: closing
  * minus opening minus flows is the money actually made.
  */
-function periodLeftPanels(
+export function periodLeftPanels(
   pr: PeriodReturn,
   asOf: PortfolioAsOf | null,
 ): Array<{ title: string; lines: Line[] }> {
@@ -508,7 +508,7 @@ function periodLeftPanels(
  * custody statement, which is why it is worth carrying; it counts deposits as
  * return, which is why it is never the headline.
  */
-function periodRightLines(pr: PeriodReturn): Line[] {
+export function periodRightLines(pr: PeriodReturn): Line[] {
   const lines: Line[] = [
     { label: 'Period Return (XIRR)', value: rate(pr.returnPct), kind: 'percent' },
     { label: 'Annualized Return', value: rate(pr.annualizedReturnPct), kind: 'percent' },
@@ -537,6 +537,41 @@ function periodRightLines(pr: PeriodReturn): Line[] {
   }
 
   return lines;
+}
+
+/**
+ * The caveats that travel with a period statement, in the order they matter.
+ *
+ * Extracted from the workbook builder so the PDF renderer emits the SAME notes
+ * rather than its own paraphrase. A caveat that appears on one rendering of a
+ * statement and not the other is worse than one that appears on neither: the
+ * two files then disagree about how the identical figures should be read.
+ */
+export function periodNotes(pr: PeriodReturn, asOf: PortfolioAsOf | null): string[] {
+  const notes: string[] = [];
+  if (pr.openPeriod) {
+    notes.push(
+      'This period has not closed. Figures are struck as at the date above and will change.',
+    );
+  }
+  if (pr.clampedToInception) {
+    const nominal = pr.nominalFrom ? fmtDate(new Date(pr.nominalFrom)) : 'its nominal start';
+    notes.push(
+      `The window opens at the 30-June-2026 inception rather than ${nominal}; returns cover the shortened period only.`,
+    );
+  }
+  if (asOf?.source === 'reconstruction') {
+    notes.push(
+      'Position at period end was replayed from the ledger, not read from a stored snapshot.',
+    );
+  }
+  if (asOf && asOf.cashShortfall > 0) {
+    notes.push(
+      'The replayed cash balance went negative before being floored at zero — the ledger has a gap over this window.',
+    );
+  }
+  notes.push('All returns are money-weighted (XIRR) and measured over the selected period.');
+  return notes;
 }
 
 /**
@@ -599,31 +634,7 @@ export function buildPeriodPerformanceWorkbook(
   // whichever ran longer and never lands beside a metrics line.
   const lastRow = Math.max(row, FIRST_BODY_ROW + right.length);
 
-  const notes: string[] = [];
-  if (pr.openPeriod) {
-    notes.push(
-      'This period has not closed. Figures are struck as at the date above and will change.',
-    );
-  }
-  if (pr.clampedToInception) {
-    const nominal = pr.nominalFrom ? fmtDate(new Date(pr.nominalFrom)) : 'its nominal start';
-    notes.push(
-      `The window opens at the 30-June-2026 inception rather than ${nominal}; returns cover the shortened period only.`,
-    );
-  }
-  if (asOf?.source === 'reconstruction') {
-    notes.push(
-      'Position at period end was replayed from the ledger, not read from a stored snapshot.',
-    );
-  }
-  if (asOf && asOf.cashShortfall > 0) {
-    notes.push(
-      'The replayed cash balance went negative before being floored at zero — the ledger has a gap over this window.',
-    );
-  }
-  notes.push('All returns are money-weighted (XIRR) and measured over the selected period.');
-
-  writeFooter(sheet, lastRow + 1, currency, notes);
+  writeFooter(sheet, lastRow + 1, currency, periodNotes(pr, asOf));
 
   if (asOf && asOf.positions.length) {
     writeHoldingsSheet(wb, asOf, currency);
@@ -797,7 +808,7 @@ export async function downloadPeriodPerformanceWorkbook(
  * individual one get read side by side in the same review, and a reader should
  * not have to relearn the page between them.
  */
-function familyLeftPanels(fr: FamilyPeriodReturn): Array<{ title: string; lines: Line[] }> {
+export function familyLeftPanels(fr: FamilyPeriodReturn): Array<{ title: string; lines: Line[] }> {
   return [
     {
       title: 'HOUSEHOLD OVER THE PERIOD',
@@ -818,7 +829,7 @@ function familyLeftPanels(fr: FamilyPeriodReturn): Array<{ title: string; lines:
   ];
 }
 
-function familyRightLines(fr: FamilyPeriodReturn): Line[] {
+export function familyRightLines(fr: FamilyPeriodReturn): Line[] {
   const lines: Line[] = [
     { label: 'Household Return (XIRR)', value: rate(fr.returnPct), kind: 'percent' },
     { label: 'Annualized Return', value: rate(fr.annualizedReturnPct), kind: 'percent' },
@@ -847,13 +858,46 @@ function familyRightLines(fr: FamilyPeriodReturn): Line[] {
   return lines;
 }
 
-function familyTimeFrameLabel(fr: FamilyPeriodReturn): string {
+export function familyTimeFrameLabel(fr: FamilyPeriodReturn): string {
   const base = `${fr.label} (${fmtDate(new Date(fr.from))} → ${fmtDate(new Date(fr.to))})`;
   if (fr.clampedToInception && fr.daysClamped > 0) {
     const days = `${fr.daysClamped} day${fr.daysClamped === 1 ? '' : 's'}`;
     return `${base} — opened at inception, ${days} short of the full window`;
   }
   return fr.openPeriod ? `${base} — period still open` : base;
+}
+
+/**
+ * The household statement's caveats. Shared with the PDF renderer for the same
+ * reason `periodNotes` is.
+ */
+export function familyNotes(fr: FamilyPeriodReturn): string[] {
+  const notes: string[] = [];
+  // Said first, because it is the one thing about this statement that differs
+  // from the individual one it will be read beside.
+  notes.push(
+    'This household is measured as a single account: one money-weighted return solved over the ' +
+      'combined cash flows of every member, not an average of the member returns.',
+  );
+  if (fr.openPeriod) {
+    notes.push(
+      'This period has not closed. Figures are struck as at the date above and will change.',
+    );
+  }
+  if (fr.clampedToInception) {
+    const nominal = fr.nominalFrom ? fmtDate(new Date(fr.nominalFrom)) : 'its nominal start';
+    notes.push(
+      `The window opens at the 30-June-2026 inception rather than ${nominal}; returns cover the shortened period only.`,
+    );
+  }
+  for (const e of fr.lateEntrants) {
+    notes.push(
+      `${e.clientName} joined this household on ${fmtDate(new Date(e.entryDate))}. Its balance is ` +
+        'counted as capital arriving on that date, not as household performance.',
+    );
+  }
+  notes.push('All returns are money-weighted (XIRR) and measured over the selected period.');
+  return notes;
 }
 
 export function buildFamilyPerformanceWorkbook(
@@ -888,33 +932,7 @@ export function buildFamilyPerformanceWorkbook(
 
   const lastRow = Math.max(FIRST_BODY_ROW + left[0].lines.length, FIRST_BODY_ROW + right.length);
 
-  const notes: string[] = [];
-  // Said first, because it is the one thing about this statement that differs
-  // from the individual one it will be read beside.
-  notes.push(
-    'This household is measured as a single account: one money-weighted return solved over the ' +
-      'combined cash flows of every member, not an average of the member returns.',
-  );
-  if (fr.openPeriod) {
-    notes.push(
-      'This period has not closed. Figures are struck as at the date above and will change.',
-    );
-  }
-  if (fr.clampedToInception) {
-    const nominal = fr.nominalFrom ? fmtDate(new Date(fr.nominalFrom)) : 'its nominal start';
-    notes.push(
-      `The window opens at the 30-June-2026 inception rather than ${nominal}; returns cover the shortened period only.`,
-    );
-  }
-  for (const e of fr.lateEntrants) {
-    notes.push(
-      `${e.clientName} joined this household on ${fmtDate(new Date(e.entryDate))}. Its balance is ` +
-        'counted as capital arriving on that date, not as household performance.',
-    );
-  }
-  notes.push('All returns are money-weighted (XIRR) and measured over the selected period.');
-
-  writeFooter(sheet, lastRow + 1, currency, notes);
+  writeFooter(sheet, lastRow + 1, currency, familyNotes(fr));
 
   if (fr.members.length) writeMembersSheet(wb, fr, currency);
 

@@ -14,6 +14,8 @@ import {
   ChevronRight,
   Upload,
   Download,
+  CalendarDays,
+  History,
   FileSpreadsheet,
   CheckCircle2,
   XCircle,
@@ -21,6 +23,7 @@ import {
 import { apiClient } from '@/lib/api';
 import { clientsApi } from '@/lib/clients.api';
 import { holdingsApi, type BulkImportSummary } from '@/lib/holdings.api';
+import { transactionsApi } from '@/lib/transactions.api';
 import { familiesApi } from '@/lib/families.api';
 import { classificationApi } from '@/lib/classification.api';
 import { SectorAssignCell } from '@/components/holdings/SectorAssignCell';
@@ -37,7 +40,7 @@ import {
   formatSignedPct,
   cn,
 } from '@/lib/utils';
-import { Holding, Client, Family, FamilyAggregate, FamilyPosition } from '@/types';
+import { Holding, Client, Family, FamilyAggregate, FamilyPosition, Transaction } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import {
@@ -117,6 +120,16 @@ interface ClientPositionRow {
   srNo: number;
   symbol: string;
   name: string;
+  /**
+   * The mandate this position sits in. Carried on EVERY drill-down row — not
+   * only the ones that display a client column — because the cost breakdown is
+   * fetched per client+ticker, and the symbol drawer's rows each belong to a
+   * different account. Without it those drawers could show a position the lot
+   * view cannot open.
+   */
+  clientId: string;
+  /** Names the book in the lot drawer's subtitle. */
+  ownerName: string;
   sector: string;
   quantity: number;
   averageCostBasis: number;
@@ -144,6 +157,30 @@ interface SectorPositionRow extends ClientPositionRow {
  */
 interface SymbolHolderRow extends ClientPositionRow {
   clientName: string;
+}
+
+/**
+ * One dated fill in a position's cost breakdown.
+ *
+ * A row of the ledger, costed — deliberately not a `Transaction`: the drawer
+ * needs the derived figures (what this fill cost, what those shares are worth
+ * now, what that gained), and computing them in the render would recompute
+ * them on every sort and paint.
+ */
+interface LotRow {
+  id: string;
+  srNo: number;
+  date: Date;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  /** Per-share price the fill actually happened at. */
+  price: number;
+  /** price x quantity — the consideration this fill moved. */
+  costBasisTotal: number;
+  /** Marked to market for a buy; 0 for a sell, whose shares are gone. */
+  currentValue: number;
+  pl: number;
+  plPercent: number;
 }
 
 /**
@@ -193,6 +230,42 @@ const UNCLASSIFIED_SECTOR_KEYS = new Set([
   '-',
 ]);
 
+/**
+ * The long-term threshold for listed equity, in days.
+ *
+ * Mirrors LONG_TERM_DAYS in the API's calculators/tax-lots.ts, where the same
+ * 365 governs the capital-gains statements. Both books happen to use 12 months
+ * (India s.2(42A), US §1222), and the test is STRICTLY greater — exactly one
+ * year is still short-term. This screen only labels a lot; the statement that
+ * carries a tax number is computed server-side, and the two must not disagree
+ * about which side of the line a holding sits on.
+ */
+const LONG_TERM_DAYS = 365;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Calendar days a lot has been held, floored.
+ *
+ * UTC-based subtraction, matching holdingDaysBetween on the server: local-time
+ * arithmetic shifts a boundary case by a day across a DST transition, and at
+ * exactly 365 days that flips the term.
+ */
+function holdingDays(acquiredOn: Date): number {
+  return Math.max(0, Math.floor((Date.now() - acquiredOn.getTime()) / MS_PER_DAY));
+}
+
+/**
+ * Share counts, kept exact enough for fractional lots.
+ *
+ * Fractional shares are ordinary here (a 0.89-share lot from a reinvestment),
+ * so a whole-number format would render two visibly different fills as the same
+ * quantity. Trailing zeros are dropped so round lots stay clean.
+ */
+function formatQuantity(qty: number): string {
+  return qty.toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
 function openPositions<T extends { quantity: number }>(rows: T[]): T[] {
   if (!Array.isArray(rows)) return [];
   return rows.filter((h) => Math.abs(Number(h.quantity) || 0) > CLOSED_POSITION_EPSILON);
@@ -217,6 +290,28 @@ export default function HoldingsPage() {
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
   const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
   const [activeSymbol, setActiveSymbol] = useState<SymbolRow | null>(null);
+
+  // --- cost-basis breakdown (the lot drawer) ---
+  /**
+   * The position whose purchase history is open, or null.
+   *
+   * Typed as the drill-down row rather than a bare {clientId, ticker} so the
+   * drawer can show the position's CURRENT state (quantity, average cost, last
+   * price) beside the lots that produced it — the two together are what let a
+   * reader check that the aggregate on the table is the sum of its parts.
+   */
+  const [activeLotPosition, setActiveLotPosition] = useState<ClientPositionRow | null>(null);
+  const [lots, setLots] = useState<Transaction[]>([]);
+  const [lotsLoading, setLotsLoading] = useState(false);
+  /**
+   * Set when the lot fetch fails.
+   *
+   * Kept separate from "no lots": an empty ledger is a real, legible answer
+   * (positions imported before trades were journalled have no rows), whereas a
+   * failed request means the breakdown is UNKNOWN. Rendering the second as the
+   * first would tell someone their cost basis came from nowhere.
+   */
+  const [lotsError, setLotsError] = useState<string | null>(null);
 
   /**
    * The sector vocabulary offered when classifying an unlabelled position.
@@ -460,6 +555,8 @@ export default function HoldingsPage() {
             srNo: i + 1,
             symbol: h.ticker,
             name: h.company,
+            clientId: h.clientId,
+            ownerName: activeClient.clientName,
             sector: h.sector || 'Uncategorized',
             quantity: h.quantity,
             averageCostBasis: h.averageCost,
@@ -750,6 +847,8 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          clientId: h.clientId,
+          ownerName: activeClient.clientName,
           // Same fallback as the sector rollup, so an unlabelled holding lands
           // in one bucket everywhere instead of a blank slice of its own.
           sector: h.sector || 'Uncategorized',
@@ -764,6 +863,125 @@ export default function HoldingsPage() {
         };
       });
   }, [holdings, activeClient]);
+
+  /**
+   * Loads the open position's lot history.
+   *
+   * Refetched per open rather than cached by ticker: the drawer is opened to
+   * audit a cost basis, and a stale list is worse than a brief spinner. The
+   * ignore flag drops a response whose position has already been closed or
+   * swapped, so a slow request cannot paint another position's lots.
+   */
+  useEffect(() => {
+    if (!activeLotPosition) return;
+    const { clientId, symbol } = activeLotPosition;
+    let ignore = false;
+
+    setLotsLoading(true);
+    setLotsError(null);
+    transactionsApi
+      .listLots(clientId, symbol)
+      .then((rows) => {
+        if (ignore) return;
+        setLots(rows);
+      })
+      .catch(() => {
+        if (ignore) return;
+        setLots([]);
+        setLotsError('Could not load the purchase history for this position.');
+      })
+      .finally(() => {
+        if (!ignore) setLotsLoading(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [activeLotPosition]);
+
+  /**
+   * The lots, costed and marked to market.
+   *
+   * Each row answers "what did this fill cost, and what is that stake worth
+   * now" — which is why a SELL is shown but carries no current value: those
+   * shares are gone, so pricing them at today's quote would invent a holding.
+   * Its P&L is realized against the position's average cost, the same basis
+   * the server books a sale at.
+   */
+  const lotRows: LotRow[] = useMemo(() => {
+    if (!activeLotPosition) return [];
+    const lastPrice = activeLotPosition.lastPrice;
+    const averageCost = activeLotPosition.averageCostBasis;
+
+    return lots.map((tx, i) => {
+      const isSell = tx.type === 'sell';
+      const quantity = Math.abs(Number(tx.quantity) || 0);
+      // Prefer the per-share price the ledger stored; fall back to the
+      // consideration divided by size for rows written before `price` was
+      // recorded, so an older lot still shows what it was actually paid at.
+      const price =
+        Number(tx.price) || (quantity ? Math.abs(Number(tx.amount) || 0) / quantity : 0);
+      const costBasisTotal = price * quantity;
+      const currentValue = isSell ? 0 : quantity * lastPrice;
+      // A buy is marked to market; a sell realised against the average cost the
+      // position carried, matching how holdings.service books realizedPnL.
+      const pl = isSell ? costBasisTotal - averageCost * quantity : currentValue - costBasisTotal;
+      const basis = isSell ? averageCost * quantity : costBasisTotal;
+
+      return {
+        id: tx.id,
+        srNo: i + 1,
+        date: new Date(tx.date),
+        side: isSell ? ('SELL' as const) : ('BUY' as const),
+        quantity,
+        price,
+        costBasisTotal,
+        currentValue,
+        pl,
+        plPercent: basis ? (pl / basis) * 100 : 0,
+      };
+    });
+  }, [lots, activeLotPosition]);
+
+  /**
+   * What the lots add up to.
+   *
+   * `netQuantity` is the reconciliation figure: buys minus sells should equal
+   * the quantity the holdings table shows. When it does not, the ledger and the
+   * position disagree — the drawer says so rather than hiding it, because that
+   * gap is precisely what someone opens a cost breakdown to find.
+   */
+  const lotTotals = useMemo(() => {
+    const buys = lotRows.filter((r) => r.side === 'BUY');
+    const sells = lotRows.filter((r) => r.side === 'SELL');
+    const netQuantity =
+      buys.reduce((s, r) => s + r.quantity, 0) - sells.reduce((s, r) => s + r.quantity, 0);
+    const invested = buys.reduce((s, r) => s + r.costBasisTotal, 0);
+    return {
+      buys: buys.length,
+      sells: sells.length,
+      netQuantity,
+      invested,
+      proceeds: sells.reduce((s, r) => s + r.costBasisTotal, 0),
+      // Weighted average of the BUYS only — the basis a sell is measured
+      // against, never itself a contributor to it.
+      avgBuyPrice: buys.reduce((s, r) => s + r.quantity, 0)
+        ? invested / buys.reduce((s, r) => s + r.quantity, 0)
+        : 0,
+    };
+  }, [lotRows]);
+
+  /**
+   * True when the lots do not rebuild the position on the table.
+   *
+   * Tolerance matches CLOSED_POSITION_EPSILON's intent — fractional shares mean
+   * an exact float match is not a fair test — but is loosened to 1e-6, since
+   * this compares two independently rounded sums rather than one subtraction.
+   */
+  const lotsDisagree = useMemo(() => {
+    if (!activeLotPosition || lotsLoading || lotsError || lots.length === 0) return false;
+    return Math.abs(lotTotals.netQuantity - activeLotPosition.quantity) > 1e-6;
+  }, [activeLotPosition, lotsLoading, lotsError, lots.length, lotTotals.netQuantity]);
 
   const clientTotals = useMemo(
     () =>
@@ -799,6 +1017,8 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          clientId: h.clientId,
+          ownerName: h.client?.name ?? 'Unknown',
           sector: h.sector || 'Uncategorized',
           clientName: h.client?.name ?? 'Unknown',
           quantity: h.quantity,
@@ -853,6 +1073,8 @@ export default function HoldingsPage() {
           srNo: i + 1,
           symbol: h.ticker,
           name: h.company,
+          clientId: h.clientId,
+          ownerName: h.client?.name ?? 'Unknown',
           sector: h.sector || 'Uncategorized',
           clientName: h.client?.name ?? 'Unknown',
           quantity: h.quantity,
@@ -1193,6 +1415,114 @@ export default function HoldingsPage() {
     },
   ];
 
+  /**
+   * The cost-basis breakdown's columns.
+   *
+   * Ordered as the story reads: WHEN it happened, which side, how much, at what
+   * price — then what that is worth today. Holding period sits beside the date
+   * because "when" and "how long" are the same question asked twice, and the
+   * second is the one that decides tax treatment.
+   */
+  const lotColumns: Column<LotRow>[] = [
+    {
+      key: 'date',
+      header: 'Acquired',
+      accessor: (r) => r.date.getTime(),
+      render: (r) => (
+        <span className="font-medium text-ink">
+          {r.date.toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+          })}
+        </span>
+      ),
+    },
+    {
+      key: 'term',
+      header: 'Term',
+      // Sorted by the underlying days, so "Short" and "Long" group in holding
+      // order rather than alphabetically.
+      accessor: (r) => holdingDays(r.date),
+      render: (r) => {
+        const days = holdingDays(r.date);
+        // Strictly greater, per the statute — exactly 365 days is short-term.
+        const long = days > LONG_TERM_DAYS;
+        return (
+          <span className="inline-flex items-center gap-2">
+            <Badge tone={long ? 'success' : 'neutral'}>{long ? 'Long' : 'Short'}</Badge>
+            <span className="text-xs text-ink-tertiary">{days.toLocaleString()}d</span>
+          </span>
+        );
+      },
+    },
+    {
+      key: 'side',
+      header: 'Action',
+      accessor: (r) => r.side,
+      render: (r) => (
+        <Badge tone={r.side === 'BUY' ? 'brand' : 'warning'}>{r.side}</Badge>
+      ),
+    },
+    {
+      key: 'quantity',
+      header: 'Quantity',
+      accessor: (r) => r.quantity,
+      align: 'right',
+      render: (r) => <span className="tabular-nums">{formatQuantity(r.quantity)}</span>,
+    },
+    {
+      key: 'price',
+      header: 'Price / Share',
+      accessor: (r) => r.price,
+      align: 'right',
+      render: (r) => formatCurrency(r.price, currency),
+    },
+    {
+      key: 'costBasisTotal',
+      header: 'Cost Basis Total',
+      accessor: (r) => r.costBasisTotal,
+      align: 'right',
+      render: (r) => (
+        <span className="font-semibold">{formatCurrency(r.costBasisTotal, currency)}</span>
+      ),
+    },
+    {
+      key: 'currentValue',
+      header: 'Current Value',
+      accessor: (r) => r.currentValue,
+      align: 'right',
+      // An em dash, not $0.00: the shares were sold, so they HAVE no current
+      // value — they are absent, not worthless.
+      render: (r) =>
+        r.side === 'SELL' ? (
+          <span className="text-ink-tertiary" title="Sold — these shares are no longer held">
+            —
+          </span>
+        ) : (
+          formatCurrency(r.currentValue, currency)
+        ),
+    },
+    {
+      key: 'pl',
+      header: 'Gain / Loss',
+      accessor: (r) => r.pl,
+      align: 'right',
+      render: (r) => (
+        <span className={cn('font-semibold', r.pl >= 0 ? 'text-success' : 'text-danger')}>
+          {formatSignedCurrency(r.pl, currency)}
+        </span>
+      ),
+    },
+    {
+      key: 'plPercent',
+      header: '%',
+      accessor: (r) => r.plPercent,
+      align: 'right',
+      render: (r) => <PnlPill pct={r.plPercent} />,
+    },
+  ];
+
   const clientPositionColumns: Column<ClientPositionRow>[] = [
     { key: 'srNo', header: 'Sr No', accessor: (r) => r.srNo, align: 'center', width: '64px' },
     {
@@ -1267,8 +1597,8 @@ export default function HoldingsPage() {
           aria-label={`Delete ${r.symbol}`}
           title={`Delete ${r.symbol}`}
           onClick={(e) => {
-            // The drawer's table has no row click today, but stopping here keeps
-            // the button safe if one is ever added.
+            // The row opens the cost breakdown, so without this a click on
+            // Delete would also open the drawer behind the confirmation.
             e.stopPropagation();
             setPendingDelete(r);
           }}
@@ -1996,6 +2326,7 @@ export default function HoldingsPage() {
 
             <DataTable
               columns={clientPositionColumns}
+              onRowClick={(r) => setActiveLotPosition(r)}
               data={clientPositions}
               rowKey={(r) => r.id}
               pageSize={20}
@@ -2014,6 +2345,129 @@ export default function HoldingsPage() {
               emptyTitle="No positions"
               emptyDescription="This client has no open positions."
             />
+          </div>
+        )}
+      </Drawer>
+
+      {/* Cost-basis breakdown — the lot history behind one position */}
+      <Drawer
+        isOpen={!!activeLotPosition}
+        onClose={() => setActiveLotPosition(null)}
+        title={activeLotPosition ? `${activeLotPosition.symbol} — Cost Breakdown` : ''}
+        description={
+          activeLotPosition
+            ? `${activeLotPosition.name} · ${activeLotPosition.ownerName}`
+            : ''
+        }
+        width={1040}
+        maximizable
+      >
+        {activeLotPosition && (
+          <div className="space-y-5">
+            {/* The aggregate as the holdings table states it. Shown above the
+                lots so the two can be read against each other — that
+                comparison is the point of the drawer. */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <SummaryTile
+                icon={<Layers className="h-4 w-4" />}
+                label="Quantity Held"
+                value={formatQuantity(activeLotPosition.quantity)}
+                hint={`${lotTotals.buys} buy${lotTotals.buys === 1 ? '' : 's'}${
+                  lotTotals.sells ? ` · ${lotTotals.sells} sell${lotTotals.sells === 1 ? '' : 's'}` : ''
+                }`}
+              />
+              <SummaryTile
+                icon={<Wallet className="h-4 w-4" />}
+                label="Average Cost Basis"
+                value={formatCurrency(activeLotPosition.averageCostBasis, currency)}
+                hint={`${formatCurrency(activeLotPosition.costBasisTotal, currency)} total`}
+              />
+              <SummaryTile
+                icon={<Briefcase className="h-4 w-4" />}
+                label="Current Value"
+                value={formatCurrency(activeLotPosition.currentValue, currency)}
+                hint={`${formatCurrency(activeLotPosition.lastPrice, currency)} last price`}
+              />
+              <SummaryTile
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Unrealized P&L"
+                value={formatSignedCurrency(activeLotPosition.pl, currency)}
+                hint={formatSignedPct(activeLotPosition.plPercent)}
+                tone={activeLotPosition.pl >= 0 ? 'success' : 'danger'}
+              />
+            </div>
+
+            {/* The ledger and the position disagree. Surfaced rather than
+                reconciled silently: the drawer's job is to explain a cost
+                basis, and it cannot honestly do that when the fills do not
+                add up to the shares on the book. */}
+            {lotsDisagree && (
+              <div className="flex items-start gap-3 rounded-[10px] border border-warning/40 bg-warning-soft/50 px-4 py-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#b45309]" />
+                <div className="text-sm text-ink-secondary">
+                  <span className="font-semibold text-ink">
+                    Lots don&apos;t reconcile to the position.
+                  </span>{' '}
+                  The ledger nets to {formatQuantity(lotTotals.netQuantity)} shares but the
+                  position holds {formatQuantity(activeLotPosition.quantity)}. The breakdown
+                  below is missing history — figures shown as of the recorded fills only.
+                </div>
+              </div>
+            )}
+
+            {lotsError ? (
+              <div className="flex items-start gap-3 rounded-[10px] border border-danger/40 bg-danger-soft/50 px-4 py-3">
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+                <div className="text-sm text-ink-secondary">{lotsError}</div>
+              </div>
+            ) : (
+              <>
+                <DataTable
+                  columns={lotColumns}
+                  data={lotRows}
+                  loading={lotsLoading}
+                  rowKey={(r) => r.id}
+                  pageSize={25}
+                  searchPlaceholder="Search lots…"
+                  emptyTitle="No purchase history"
+                  emptyDescription="This position has no recorded buys or sells. Positions created before trades were journalled carry only an average cost."
+                />
+
+                {/* Totals of what was actually transacted, kept out of the
+                    table so sorting and paging cannot detach them from the
+                    rows they summarise. */}
+                {!lotsLoading && lotRows.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-x-8 gap-y-2 rounded-[10px] border border-border bg-surface-2 px-4 py-3 text-sm">
+                    <div>
+                      <span className="text-ink-tertiary">Total invested</span>{' '}
+                      <span className="font-semibold text-ink tabular-nums">
+                        {formatCurrency(lotTotals.invested, currency)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-ink-tertiary">Avg buy price</span>{' '}
+                      <span className="font-semibold text-ink tabular-nums">
+                        {formatCurrency(lotTotals.avgBuyPrice, currency)}
+                      </span>
+                    </div>
+                    {lotTotals.sells > 0 && (
+                      <div>
+                        <span className="text-ink-tertiary">Sale proceeds</span>{' '}
+                        <span className="font-semibold text-ink tabular-nums">
+                          {formatCurrency(lotTotals.proceeds, currency)}
+                        </span>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-ink-tertiary">Net shares</span>{' '}
+                      <span className="font-semibold text-ink tabular-nums">
+                        {formatQuantity(lotTotals.netQuantity)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </Drawer>
@@ -2107,6 +2561,7 @@ export default function HoldingsPage() {
 
             <DataTable
               columns={sectorPositionColumns}
+              onRowClick={(r) => setActiveLotPosition(r)}
               data={sectorPositions}
               rowKey={(r) => r.id}
               pageSize={20}
@@ -2161,6 +2616,7 @@ export default function HoldingsPage() {
 
             <DataTable
               columns={symbolHolderColumns}
+              onRowClick={(r) => setActiveLotPosition(r)}
               data={symbolHolders}
               rowKey={(r) => r.id}
               pageSize={20}

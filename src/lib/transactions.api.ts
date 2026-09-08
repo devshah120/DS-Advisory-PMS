@@ -15,6 +15,22 @@ export const transactionsApi = {
   },
 
   /**
+   * The dated buy/sell lots behind a single position.
+   *
+   * The ticker is encoded because Indian symbols carry a '.NS' suffix and a
+   * raw dot in a path segment is at the mercy of whatever normalises the URL
+   * on the way through.
+   */
+  async listLots(clientId: string, ticker: string) {
+    const res = await apiClient
+      .getClient()
+      .get<Transaction[]>(
+        `/transactions/client/${clientId}/lots/${encodeURIComponent(ticker)}`
+      );
+    return res.data;
+  },
+
+  /**
    * Record an external inflow/outflow. The backend maps direction -> type
    * (cash_deposit / cash_withdrawal) and stores the amount as a positive number,
    * so the sign convention lives in exactly one place.

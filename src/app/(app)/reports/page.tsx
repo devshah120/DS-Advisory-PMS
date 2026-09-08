@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import {
   AlertTriangle,
   FileText,
@@ -26,6 +27,18 @@ import {
   InvoiceableFamily,
 } from '@/types/reports';
 import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
+/**
+ * Loaded on demand. The generator carries the PDF renderer behind it and is
+ * only reachable by clicking one card, so it has no business in the weight of
+ * a page whose main job is the fee table.
+ */
+const PerformanceSummaryModal = dynamic(
+  () =>
+    import('@/components/reports/PerformanceSummaryModal').then(
+      (m) => m.PerformanceSummaryModal,
+    ),
+  { ssr: false },
+);
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, Badge, Button, Select, useToast } from '@/components/ui';
@@ -37,6 +50,13 @@ interface ReportTemplate {
   icon: React.ReactNode;
   cadence: string;
   format: 'PDF' | 'XLSX' | 'CSV';
+  /**
+   * True once this template has a real generator wired to it, rather than the
+   * placeholder that toasts without producing a file. Drives both the click
+   * behaviour and the "Ready" badge, so the card cannot claim to work while
+   * still being a stub.
+   */
+  generator?: boolean;
 }
 
 interface GeneratedReport {
@@ -53,10 +73,14 @@ const templates: ReportTemplate[] = [
   {
     id: 'perf-summary',
     title: 'Performance Summary',
-    description: 'Returns, attribution, and benchmark comparison across all mandates.',
+    // "across all mandates" was a promise the card could not keep: a return is
+    // only meaningful for one subject over one window, and there is no
+    // firm-wide XIRR to report. It now says what it actually produces.
+    description: 'Returns, benchmark comparison and alpha for one mandate or household, over the period you choose.',
     icon: <FileBarChart className="h-5 w-5" />,
     cadence: 'Monthly',
     format: 'PDF',
+    generator: true,
   },
   {
     id: 'holdings-statement',
@@ -127,6 +151,15 @@ export default function ReportsPage() {
   const { market, meta, ready: marketReady } = useMarket();
   const currency = meta.currency;
   const [generating, setGenerating] = useState<string | null>(null);
+  /**
+   * Which template's own generator is open, if any.
+   *
+   * A report that has a real generator behind it opens that generator; the rest
+   * still fall through to the placeholder below. Held as the template id rather
+   * than a boolean so the remaining cards can be given their own panels one at
+   * a time without this becoming a row of separate flags.
+   */
+  const [openGenerator, setOpenGenerator] = useState<string | null>(null);
 
   const [fees, setFees] = useState<ClientFeeRow[]>([]);
   const [feesLoading, setFeesLoading] = useState(true);
@@ -265,6 +298,13 @@ export default function ReportsPage() {
   const selectedQuarter = quarters.find((q) => q.code === quarter);
 
   const handleGenerate = (tpl: ReportTemplate) => {
+    // A template with a real generator opens it: a Performance Summary is
+    // about ONE subject over ONE window, and neither can be guessed from a
+    // click on a card. The rest keep the placeholder until they are built out.
+    if (tpl.generator) {
+      setOpenGenerator(tpl.id);
+      return;
+    }
     setGenerating(tpl.id);
     setTimeout(() => {
       setGenerating(null);
@@ -363,7 +403,12 @@ export default function ReportsPage() {
                   <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-brand-soft text-brand">
                     {tpl.icon}
                   </span>
-                  <Badge tone={formatTone[tpl.format]}>{tpl.format}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    {/* Says which cards actually produce a file. Without it the
+                        six read as equals, and five of them are not. */}
+                    {tpl.generator && <Badge tone="success">Ready</Badge>}
+                    <Badge tone={formatTone[tpl.format]}>{tpl.format}</Badge>
+                  </div>
                 </div>
                 <p className="mt-3 text-[15px] font-semibold text-ink">{tpl.title}</p>
                 <p className="mt-1 flex-1 text-[13px] text-ink-secondary">{tpl.description}</p>
@@ -374,7 +419,13 @@ export default function ReportsPage() {
                   </span>
                   <Button
                     size="sm"
-                    leftIcon={<Download className="h-3.5 w-3.5" />}
+                    leftIcon={
+                      tpl.generator ? (
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )
+                    }
                     loading={generating === tpl.id}
                     onClick={() => handleGenerate(tpl)}
                   >
@@ -628,6 +679,14 @@ export default function ReportsPage() {
           </table>
         </Card>
       </div>
+
+      {/* The Performance Summary's own generator. Mounted here rather than
+          inside the card so the modal is not unmounted by a re-render of the
+          template grid mid-selection. */}
+      <PerformanceSummaryModal
+        isOpen={openGenerator === 'perf-summary'}
+        onClose={() => setOpenGenerator(null)}
+      />
     </>
   );
 }
