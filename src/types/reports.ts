@@ -22,13 +22,24 @@ export interface ClientFeeRow {
    * already-billed capital does not change the base.
    */
   portfolioValue: number;
-  /** The book at quarter start. Null on rows frozen before proration shipped. */
-  openingValue: number | null;
+  /**
+   * The book at quarter start. Null on rows frozen before proration shipped.
+   *
+   * Optional because an API deployed before segmented proration omits the
+   * field entirely — see `segments`.
+   */
+  openingValue?: number | null;
   /**
    * Why the fee is the number it is. Empty on rows frozen before segmented
    * proration shipped — those carry only a total.
+   *
+   * OPTIONAL, and it must stay optional. An API that predates this feature
+   * sends no such field, and a non-optional type told the compiler it was
+   * always present — which is exactly how `segments.some(...)` shipped and
+   * crashed the whole fee table against an older server. Read it through
+   * `feeSegments()` rather than touching it directly.
    */
-  segments: FeeSegment[];
+  segments?: FeeSegment[];
   /** Canonical quarter code, e.g. "Q3-CY26". */
   quarter: string;
   quarterLabel: string;
@@ -52,6 +63,25 @@ export interface ClientFeeRow {
   valuationSource: string;
   /** The client's own reporting currency — the unit this fee was billed in. */
   currency: string;
+}
+
+/**
+ * A fee row's segments, safe to iterate.
+ *
+ * The ONLY way this field should be read. A fee row can arrive without it —
+ * from an API deployed before segmented proration, or as a frozen row billed
+ * on the old single-NAV basis — and an absent breakdown means "billed as one
+ * amount", which an empty list expresses correctly at every call site.
+ */
+export function feeSegments(row: {
+  segments?: FeeSegment[] | null;
+}): FeeSegment[] {
+  return row.segments ?? [];
+}
+
+/** How many separately prorated tranches a fee row carries. */
+export function proratedTrancheCount(row: { segments?: FeeSegment[] | null }): number {
+  return feeSegments(row).filter((s) => s.kind === 'flow').length;
 }
 
 /** One member account that could not be billed this quarter, and why. */

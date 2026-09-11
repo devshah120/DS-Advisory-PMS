@@ -1,5 +1,10 @@
 import ExcelJS from 'exceljs';
-import { ClientFeeRow, FamilyFeeInvoice } from '@/types/reports';
+import {
+  ClientFeeRow,
+  FamilyFeeInvoice,
+  feeSegments,
+  proratedTrancheCount,
+} from '@/types/reports';
 import { formatDate } from './utils';
 
 const LABEL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
@@ -52,7 +57,7 @@ function currencyFormat(currency: string | undefined) {
  * carries the breakdown.
  */
 function daysBilledLabel(line: ClientFeeRow): string {
-  const flows = line.segments.filter((s) => s.kind === 'flow').length;
+  const flows = proratedTrancheCount(line);
   const base = `${line.daysBilled} / ${line.daysInQuarter}`;
   return flows > 0 ? `${base} +${flows} tranche${flows === 1 ? '' : 's'}` : base;
 }
@@ -116,7 +121,10 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
 
   // The opening book is only a separate line when there IS a breakdown to
   // separate it from. On a pre-proration row it would be an empty cell.
-  if (fee.openingValue !== null) {
+  // Loose != catches both null (a pre-proration frozen row) and undefined (an
+  // API deployed before the field existed) — neither has an opening book to
+  // print, and `!== null` alone would let undefined through into the cell.
+  if (fee.openingValue != null) {
     rows.push(['Opening book (start of quarter)', fee.openingValue, money.numFmt]);
   }
 
@@ -163,8 +171,12 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   workingTitle.font = { bold: true, size: 11 };
   sheet.addRow([]);
 
+  // Absent on a row billed under the old single-NAV basis, which then falls
+  // through to the substituted one-line formula below.
+  const segments = feeSegments(fee);
+
   const formula = sheet.addRow([
-    fee.segments.length > 0
+    segments.length > 0
       ? 'Fee = Σ (capital × (annual rate ÷ 4) × (days at work ÷ days in quarter))'
       : 'Fee = Portfolio value × (annual rate ÷ 4) × (days billed ÷ days in quarter)',
   ]);
@@ -178,7 +190,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
    * the question a client asks when they add money late in a quarter: capital
    * deployed on the 11th shows 20 days, not the full 92, on its own line.
    */
-  if (fee.segments.length > 0) {
+  if (segments.length > 0) {
     sheet.addRow([]);
     const segHeader = sheet.addRow(['Billed from', 'Capital']);
     segHeader.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
@@ -188,7 +200,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
       cell.alignment = { horizontal: col === 1 ? 'left' : 'right' };
     });
 
-    for (const seg of fee.segments) {
+    for (const seg of segments) {
       const label =
         seg.kind === 'opening'
           ? `${formatDate(seg.from)} — opening book`
@@ -235,7 +247,7 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
    * prorated number without saying it prorates invites the exact dispute the
    * proration was built to prevent.
    */
-  if (fee.segments.some((s) => s.kind === 'flow')) {
+  if (proratedTrancheCount(fee) > 0) {
     sheet.addRow([]);
     const note = sheet.addRow([
       'Capital added during the quarter is charged only for the days it was invested, ' +
@@ -522,6 +534,7 @@ function writeAccountDetailSheet(
     });
 
   for (const line of invoice.lines) {
+    const lineSegments = feeSegments(line);
     const row = sheet.addRow([
       line.clientName,
       line.portfolioValue,
@@ -529,8 +542,8 @@ function writeAccountDetailSheet(
       daysBilledLabel(line),
       effectiveProration(line),
       line.feeAmount,
-      line.segments.length > 0
-        ? `Σ of ${line.segments.length} tranche${line.segments.length === 1 ? '' : 's'} below`
+      lineSegments.length > 0
+        ? `Σ of ${lineSegments.length} tranche${lineSegments.length === 1 ? '' : 's'} below`
         : `${asMoney(line.portfolioValue)} × (${line.feeRatePercent}% ÷ 4) × ` +
           `(${line.daysBilled} ÷ ${line.daysInQuarter})`,
       VALUATION_SOURCE_LABEL[line.valuationSource] ?? line.valuationSource,
@@ -551,7 +564,7 @@ function writeAccountDetailSheet(
      * added money mid-quarter can point at the line and see the day-count it
      * was actually billed over.
      */
-    for (const seg of line.segments) {
+    for (const seg of lineSegments) {
       const detail = sheet.addRow([
         seg.kind === 'opening'
           ? `      opening book, from ${formatDate(seg.from)}`

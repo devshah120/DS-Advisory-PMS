@@ -25,6 +25,7 @@ import {
   FeeQuarterOption,
   FamilyFeeInvoice,
   InvoiceableFamily,
+  proratedTrancheCount,
 } from '@/types/reports';
 import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
 /**
@@ -590,9 +591,9 @@ export default function ReportsPage() {
                         window, so the row says how many such tranches exist
                         rather than implying one number covers the whole fee.
                       */}
-                      {f.segments.some((s) => s.kind === 'flow') && (
+                      {proratedTrancheCount(f) > 0 && (
                         <div className="text-[11px] text-ink-tertiary">
-                          +{f.segments.filter((s) => s.kind === 'flow').length} prorated
+                          +{proratedTrancheCount(f)} prorated
                         </div>
                       )}
                     </td>
@@ -781,9 +782,9 @@ function FamilyInvoiceView({
                 <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
                   {line.daysBilled} / {line.daysInQuarter}
                   {/* See the fee table: the count is the opening book's alone. */}
-                  {line.segments.some((s) => s.kind === 'flow') && (
+                  {proratedTrancheCount(line) > 0 && (
                     <div className="text-[11px] text-ink-tertiary">
-                      +{line.segments.filter((s) => s.kind === 'flow').length} prorated
+                      +{proratedTrancheCount(line)} prorated
                     </div>
                   )}
                 </td>
