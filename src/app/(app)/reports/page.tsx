@@ -14,7 +14,7 @@ import {
   ArrowRight,
   Percent,
 } from 'lucide-react';
-import { formatDate, formatCurrency, formatPct, cn } from '@/lib/utils';
+import { formatCurrency, formatPct, cn } from '@/lib/utils';
 import { reportsApi } from '@/lib/reports.api';
 import {
   downloadClientFeeWorkbook,
@@ -440,6 +440,11 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+
+      {/* The Holdings Statement, Review Pack and Risk Report all generate
+          through one dialog — it asks for the subject, previews what the file
+          will contain, and writes it. */}
+      <ReportGeneratorModal reportId={openReport} onClose={() => setOpenReport(null)} />
 
       {/* Both reports open here rather than sitting expanded on the page. The
           controls and export inside are the same ones that were inline; only
