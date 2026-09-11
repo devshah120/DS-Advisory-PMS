@@ -11,6 +11,9 @@ const sizeMap = {
   md: 'max-w-md',
   lg: 'max-w-lg',
   xl: 'max-w-2xl',
+  // Wide enough for a report table to keep its columns on one line rather than
+  // wrapping every cell; the panel bodies that use it scroll internally.
+  '2xl': 'max-w-5xl',
 };
 
 export function Modal({
@@ -81,7 +84,7 @@ export function Modal({
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
           >
-            {(title || description) && (
+            {title || description ? (
               <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
                 <div>
                   {title && <h2 className="text-base font-semibold text-ink">{title}</h2>}
@@ -91,13 +94,27 @@ export function Modal({
                 </div>
                 <button
                   onClick={onClose}
+                  aria-label="Close"
                   className="-mr-1 -mt-1 rounded-lg p-1.5 text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink"
                 >
                   <X className="h-4.5 w-4.5" />
                 </button>
               </div>
+            ) : (
+              /* A titleless modal still needs a way out that isn't Escape or a
+                 backdrop click — content that brings its own header (a report
+                 panel, say) gets a floating close instead of a duplicate one. */
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="absolute right-4 top-4 z-10 rounded-lg bg-white/80 p-1.5 text-ink-tertiary backdrop-blur transition-colors hover:bg-surface-3 hover:text-ink"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
             )}
-            <div className="px-6 py-5">{children}</div>
+            {/* Capped so a long report table scrolls inside the modal instead of
+                pushing the header and footer off the viewport. */}
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">{children}</div>
             {footer && (
               <div className="flex items-center justify-end gap-3 border-t border-border bg-surface-2 px-6 py-4">
                 {footer}

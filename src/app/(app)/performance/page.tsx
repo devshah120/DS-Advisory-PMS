@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   Coins,
   Download,
+  FileSpreadsheet,
+  FileText,
   Percent,
   RefreshCw,
   Scale,
@@ -34,6 +36,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Dropdown,
   EmptyState,
   Select,
   Skeleton,
@@ -242,29 +245,65 @@ export default function PerformancePage() {
       ? periodState.loading || !periodState.periodReturn
       : !result || result.data.status !== 'ok';
 
-  const handleExport = useCallback(async () => {
-    const name = client?.name ?? 'Client';
-    try {
-      if (familyId) {
-        if (!familyState.periodReturn) return;
-        await downloadFamilyPerformanceWorkbook(familyState.periodReturn, currency);
-      } else if (usePeriodSheet) {
-        if (!periodState.periodReturn) return;
-        await downloadPeriodPerformanceWorkbook(
-          name,
-          periodState.periodReturn,
-          periodState.asOf,
-          currency,
-        );
-      } else {
-        if (!result) return;
-        await downloadPerformanceWorkbook(name, result, currency);
+  /**
+   * The Performance Summary is generated HERE, in both formats, rather than
+   * from a card on the Reports page. The sheet on screen already IS that
+   * report — same subject, same window, same engine — so a second entry point
+   * that re-asked for subject and period could only duplicate it, and could
+   * disagree with it the moment the two drifted. Reports now links here.
+   *
+   * PDF is the client-facing statement and XLSX the working copy; which one a
+   * reader wants is a property of the errand, not of the data, so both hang
+   * off the one Export control rather than one being the hidden default.
+   */
+  const handleExport = useCallback(
+    async (format: 'pdf' | 'xlsx') => {
+      const name = client?.name ?? 'Client';
+      try {
+        if (familyId) {
+          if (!familyState.periodReturn) return;
+          if (format === 'pdf') {
+            const { downloadFamilyPerformancePdf } = await import('@/lib/performancePdf');
+            downloadFamilyPerformancePdf(familyState.periodReturn, currency);
+          } else {
+            await downloadFamilyPerformanceWorkbook(familyState.periodReturn, currency);
+          }
+        } else if (usePeriodSheet) {
+          if (!periodState.periodReturn) return;
+          if (format === 'pdf') {
+            const { downloadPeriodPerformancePdf } = await import('@/lib/performancePdf');
+            downloadPeriodPerformancePdf(
+              name,
+              periodState.periodReturn,
+              periodState.asOf,
+              currency,
+            );
+          } else {
+            await downloadPeriodPerformanceWorkbook(
+              name,
+              periodState.periodReturn,
+              periodState.asOf,
+              currency,
+            );
+          }
+        } else {
+          if (!result) return;
+          await downloadPerformanceWorkbook(name, result, currency);
+        }
+      } catch {
+        toast({ tone: 'error', title: 'Could not build the report' });
       }
-    } catch {
-      toast({ tone: 'error', title: 'Could not build the report' });
-    }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [familyId, familyState, usePeriodSheet, periodState, result, client, currency]);
+    [familyId, familyState, usePeriodSheet, periodState, result, client, currency],
+  );
+
+  /**
+   * The since-inception sheet (the US book) has a workbook generator but no PDF
+   * layout, so it keeps a single Export button rather than offering a format it
+   * cannot produce. Only the period and household sheets get the choice.
+   */
+  const canExportPdf = Boolean(familyId) || usePeriodSheet;
 
   usePageHeading({
     title: 'Performance',
@@ -323,15 +362,44 @@ export default function PerformancePage() {
             itself — the earlier objection was to a one-window export labelled
             as if it were the whole book, which the period workbook's own
             time-frame line and footnotes rule out. */}
-        <Button
-          variant="outline"
-          size="md"
-          leftIcon={<Download className="h-4 w-4" />}
-          disabled={exportDisabled}
-          onClick={handleExport}
-        >
-          Export
-        </Button>
+        {canExportPdf ? (
+          <Dropdown
+            align="right"
+            width={188}
+            trigger={
+              <Button
+                variant="outline"
+                size="md"
+                leftIcon={<Download className="h-4 w-4" />}
+                disabled={exportDisabled}
+              >
+                Export
+              </Button>
+            }
+            items={[
+              {
+                label: 'Download PDF',
+                icon: <FileText className="h-4 w-4" />,
+                onClick: () => void handleExport('pdf'),
+              },
+              {
+                label: 'Download Excel',
+                icon: <FileSpreadsheet className="h-4 w-4" />,
+                onClick: () => void handleExport('xlsx'),
+              },
+            ]}
+          />
+        ) : (
+          <Button
+            variant="outline"
+            size="md"
+            leftIcon={<Download className="h-4 w-4" />}
+            disabled={exportDisabled}
+            onClick={() => void handleExport('xlsx')}
+          >
+            Export
+          </Button>
+        )}
         <Button
           size="md"
           leftIcon={<RefreshCw className={cn('h-4 w-4', refreshBusy && 'animate-spin')} />}

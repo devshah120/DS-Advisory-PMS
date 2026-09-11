@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import {
   AlertTriangle,
   FileText,
@@ -28,21 +28,9 @@ import {
   proratedTrancheCount,
 } from '@/types/reports';
 import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
-/**
- * Loaded on demand. The generator carries the PDF renderer behind it and is
- * only reachable by clicking one card, so it has no business in the weight of
- * a page whose main job is the fee table.
- */
-const PerformanceSummaryModal = dynamic(
-  () =>
-    import('@/components/reports/PerformanceSummaryModal').then(
-      (m) => m.PerformanceSummaryModal,
-    ),
-  { ssr: false },
-);
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
-import { Card, CardHeader, Badge, Button, Select, useToast } from '@/components/ui';
+import { Card, CardHeader, Badge, Button, Select, Modal, useToast } from '@/components/ui';
 
 interface ReportTemplate {
   id: string;
@@ -51,14 +39,10 @@ interface ReportTemplate {
   icon: React.ReactNode;
   cadence: string;
   format: 'PDF' | 'XLSX' | 'CSV';
-  /**
-   * True once this template has a real generator wired to it, rather than the
-   * placeholder that toasts without producing a file. Drives both the click
-   * behaviour and the "Ready" badge, so the card cannot claim to work while
-   * still being a stub.
-   */
-  generator?: boolean;
 }
+
+/** A library tile whose report opens in a dialog instead of a toast. */
+interface PanelShortcut extends ReportTemplate {}
 
 interface GeneratedReport {
   id: string;
@@ -71,18 +55,6 @@ interface GeneratedReport {
 }
 
 const templates: ReportTemplate[] = [
-  {
-    id: 'perf-summary',
-    title: 'Performance Summary',
-    // "across all mandates" was a promise the card could not keep: a return is
-    // only meaningful for one subject over one window, and there is no
-    // firm-wide XIRR to report. It now says what it actually produces.
-    description: 'Returns, benchmark comparison and alpha for one mandate or household, over the period you choose.',
-    icon: <FileBarChart className="h-5 w-5" />,
-    cadence: 'Monthly',
-    format: 'PDF',
-    generator: true,
-  },
   {
     id: 'holdings-statement',
     title: 'Holdings Statement',
@@ -108,20 +80,39 @@ const templates: ReportTemplate[] = [
     format: 'PDF',
   },
   {
-    id: 'tax-lots',
-    title: 'Realized Gains / Tax Lots',
-    description: 'Realized P&L and tax-lot detail for the selected period.',
-    icon: <Landmark className="h-5 w-5" />,
-    cadence: 'Annual',
-    format: 'CSV',
-  },
-  {
     id: 'transactions',
     title: 'Transaction Ledger',
     description: 'Complete trade and cash activity log across accounts.',
     icon: <CalendarClock className="h-5 w-5" />,
     cadence: 'On demand',
     format: 'CSV',
+  },
+];
+
+/**
+ * Capital Gains and the Fee Schedule are NOT cards in `templates`.
+ *
+ * The other templates fake a generate; these two are real reports with their
+ * own subject and period controls and a working export. Generating one opens
+ * it in a dialog, so the page stays a library of reports rather than a stack
+ * of permanently-expanded tables the reader has to scroll past.
+ */
+const panelShortcuts: PanelShortcut[] = [
+  {
+    id: 'capital-gains',
+    title: 'Capital Gains Statement',
+    description: 'Realized FIFO gains split short- and long-term, cut on the fiscal year.',
+    icon: <Landmark className="h-5 w-5" />,
+    cadence: 'Fiscal year',
+    format: 'XLSX',
+  },
+  {
+    id: 'fee-schedule',
+    title: 'Fee Schedule',
+    description: 'Advisory fees per mandate, or a household invoice summing its members.',
+    icon: <Percent className="h-5 w-5" />,
+    cadence: 'Quarterly',
+    format: 'XLSX',
   },
 ];
 
@@ -152,15 +143,8 @@ export default function ReportsPage() {
   const { market, meta, ready: marketReady } = useMarket();
   const currency = meta.currency;
   const [generating, setGenerating] = useState<string | null>(null);
-  /**
-   * Which template's own generator is open, if any.
-   *
-   * A report that has a real generator behind it opens that generator; the rest
-   * still fall through to the placeholder below. Held as the template id rather
-   * than a boolean so the remaining cards can be given their own panels one at
-   * a time without this becoming a row of separate flags.
-   */
-  const [openGenerator, setOpenGenerator] = useState<string | null>(null);
+  /** Which report dialog is open, by panel id. */
+  const [openPanel, setOpenPanel] = useState<string | null>(null);
 
   const [fees, setFees] = useState<ClientFeeRow[]>([]);
   const [feesLoading, setFeesLoading] = useState(true);
@@ -299,13 +283,6 @@ export default function ReportsPage() {
   const selectedQuarter = quarters.find((q) => q.code === quarter);
 
   const handleGenerate = (tpl: ReportTemplate) => {
-    // A template with a real generator opens it: a Performance Summary is
-    // about ONE subject over ONE window, and neither can be guessed from a
-    // click on a card. The rest keep the placeholder until they are built out.
-    if (tpl.generator) {
-      setOpenGenerator(tpl.id);
-      return;
-    }
     setGenerating(tpl.id);
     setTimeout(() => {
       setGenerating(null);
@@ -397,6 +374,37 @@ export default function ReportsPage() {
           <h2 className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-ink-tertiary">
             Report Library
           </h2>
+          {/**
+            * The Performance Summary is NOT a card here.
+            *
+            * It used to be, and it re-asked for a subject and a window that the
+            * Performance page had already been given — two doors to one report,
+            * free to disagree about which subject or period a reader thought
+            * they had chosen. It is generated there instead, in PDF and Excel,
+            * off the sheet actually on screen. This line is left in its place so
+            * someone who comes here looking for it is sent on rather than
+            * concluding it was withdrawn.
+            */}
+          <Link
+            href="/performance"
+            className="mb-4 flex items-center justify-between gap-3 rounded-[12px] border border-border bg-surface px-4 py-3 transition-colors hover:border-brand/40 hover:bg-brand-soft/40"
+          >
+            <span className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-brand-soft text-brand">
+                <FileBarChart className="h-4.5 w-4.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[14px] font-semibold text-ink">
+                  Performance Summary
+                </span>
+                <span className="block text-[13px] text-ink-secondary">
+                  Generated on the Performance page — download as PDF or Excel for the
+                  mandate, household and period shown there.
+                </span>
+              </span>
+            </span>
+            <ArrowRight className="h-4 w-4 shrink-0 text-ink-tertiary" />
+          </Link>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {templates.map((tpl) => (
               <Card key={tpl.id} padding="md" hover className="flex flex-col">
@@ -404,12 +412,7 @@ export default function ReportsPage() {
                   <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-brand-soft text-brand">
                     {tpl.icon}
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    {/* Says which cards actually produce a file. Without it the
-                        six read as equals, and five of them are not. */}
-                    {tpl.generator && <Badge tone="success">Ready</Badge>}
-                    <Badge tone={formatTone[tpl.format]}>{tpl.format}</Badge>
-                  </div>
+                  <Badge tone={formatTone[tpl.format]}>{tpl.format}</Badge>
                 </div>
                 <p className="mt-3 text-[15px] font-semibold text-ink">{tpl.title}</p>
                 <p className="mt-1 flex-1 text-[13px] text-ink-secondary">{tpl.description}</p>
@@ -420,15 +423,34 @@ export default function ReportsPage() {
                   </span>
                   <Button
                     size="sm"
-                    leftIcon={
-                      tpl.generator ? (
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )
-                    }
+                    leftIcon={<Download className="h-3.5 w-3.5" />}
                     loading={generating === tpl.id}
                     onClick={() => handleGenerate(tpl)}
+                  >
+                    Generate
+                  </Button>
+                </div>
+              </Card>
+            ))}
+            {panelShortcuts.map((panel) => (
+              <Card key={panel.id} padding="md" hover className="flex flex-col">
+                <div className="flex items-start justify-between">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-brand-soft text-brand">
+                    {panel.icon}
+                  </span>
+                  <Badge tone={formatTone[panel.format]}>{panel.format}</Badge>
+                </div>
+                <p className="mt-3 text-[15px] font-semibold text-ink">{panel.title}</p>
+                <p className="mt-1 flex-1 text-[13px] text-ink-secondary">{panel.description}</p>
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-ink-tertiary">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {panel.cadence}
+                  </span>
+                  <Button
+                    size="sm"
+                    leftIcon={<Download className="h-3.5 w-3.5" />}
+                    onClick={() => setOpenPanel(panel.id)}
                   >
                     Generate
                   </Button>
@@ -438,11 +460,78 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Capital Gains — FIFO, cut on the client's own fiscal calendar. */}
-        <CapitalGainsPanel />
 
-        {/* Fee Schedule */}
+        {/* Recent reports */}
         <Card padding="none">
+          <div className="flex items-center justify-between px-5 py-5">
+            <CardHeader title="Recent Reports" subtitle="Generated in the last 30 days" />
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                <th className="px-5 py-2.5">Report</th>
+                <th className="px-5 py-2.5">Type</th>
+                <th className="px-5 py-2.5">Period</th>
+                <th className="px-5 py-2.5">Created</th>
+                <th className="px-5 py-2.5 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {recentReports.map((r) => (
+                <tr key={r.id} className="transition-colors hover:bg-surface-2">
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
+                        <FileText className="h-4 w-4" />
+                      </span>
+                      <span className="text-[13px] font-medium text-ink">{r.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.type}</td>
+                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.period}</td>
+                  <td className="px-5 py-3 text-[13px] tabular-nums text-ink-tertiary">
+                    {formatDate(r.createdAt)}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {r.status === 'ready' ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Download className="h-3.5 w-3.5" />}
+                        onClick={() => toast({ tone: 'success', title: `Downloading ${r.name}` })}
+                      >
+                        {r.format}
+                      </Button>
+                    ) : (
+                      <Badge tone="warning" dot>
+                        Processing
+                      </Badge>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </div>
+
+      {/* Both reports open here rather than sitting expanded on the page. The
+          controls and export inside are the same ones that were inline; only
+          the container changed. */}
+      <Modal
+        isOpen={openPanel === 'capital-gains'}
+        onClose={() => setOpenPanel(null)}
+        size="2xl"
+      >
+        <CapitalGainsPanel />
+      </Modal>
+
+      <Modal
+        isOpen={openPanel === 'fee-schedule'}
+        onClose={() => setOpenPanel(null)}
+        size="2xl"
+      >
+        <div className="-mx-6 -my-5">
           <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
             <CardHeader
               title={familyId && invoice ? `Invoice — ${invoice.familyName}` : 'Fee Schedule'}
@@ -636,69 +725,8 @@ export default function ReportsPage() {
             )}
           </table>
           )}
-        </Card>
-
-        {/* Recent reports */}
-        <Card padding="none">
-          <div className="flex items-center justify-between px-5 py-5">
-            <CardHeader title="Recent Reports" subtitle="Generated in the last 30 days" />
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                <th className="px-5 py-2.5">Report</th>
-                <th className="px-5 py-2.5">Type</th>
-                <th className="px-5 py-2.5">Period</th>
-                <th className="px-5 py-2.5">Created</th>
-                <th className="px-5 py-2.5 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {recentReports.map((r) => (
-                <tr key={r.id} className="transition-colors hover:bg-surface-2">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
-                        <FileText className="h-4 w-4" />
-                      </span>
-                      <span className="text-[13px] font-medium text-ink">{r.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.type}</td>
-                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.period}</td>
-                  <td className="px-5 py-3 text-[13px] tabular-nums text-ink-tertiary">
-                    {formatDate(r.createdAt)}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    {r.status === 'ready' ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leftIcon={<Download className="h-3.5 w-3.5" />}
-                        onClick={() => toast({ tone: 'success', title: `Downloading ${r.name}` })}
-                      >
-                        {r.format}
-                      </Button>
-                    ) : (
-                      <Badge tone="warning" dot>
-                        Processing
-                      </Badge>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      </div>
-
-      {/* The Performance Summary's own generator. Mounted here rather than
-          inside the card so the modal is not unmounted by a re-render of the
-          template grid mid-selection. */}
-      <PerformanceSummaryModal
-        isOpen={openGenerator === 'perf-summary'}
-        onClose={() => setOpenGenerator(null)}
-      />
+        </div>
+      </Modal>
     </>
   );
 }
