@@ -401,8 +401,7 @@ export default function ReportsPage() {
                   <Button
                     size="sm"
                     leftIcon={<Download className="h-3.5 w-3.5" />}
-                    loading={generating === tpl.id}
-                    onClick={() => handleGenerate(tpl)}
+                    onClick={() => setOpenReport(tpl.id as ReportId)}
                   >
                     Generate
                   </Button>
