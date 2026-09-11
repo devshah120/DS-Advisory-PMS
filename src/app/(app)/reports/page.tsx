@@ -28,6 +28,10 @@ import {
   proratedTrancheCount,
 } from '@/types/reports';
 import { CapitalGainsPanel } from '@/components/reports/CapitalGainsPanel';
+import {
+  ReportGeneratorModal,
+  type ReportId,
+} from '@/components/reports/ReportGeneratorModal';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Card, CardHeader, Badge, Button, Select, Modal, useToast } from '@/components/ui';
@@ -435,60 +439,6 @@ export default function ReportsPage() {
             ))}
           </div>
         </div>
-
-
-        {/* Recent reports */}
-        <Card padding="none">
-          <div className="flex items-center justify-between px-5 py-5">
-            <CardHeader title="Recent Reports" subtitle="Generated in the last 30 days" />
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                <th className="px-5 py-2.5">Report</th>
-                <th className="px-5 py-2.5">Type</th>
-                <th className="px-5 py-2.5">Period</th>
-                <th className="px-5 py-2.5">Created</th>
-                <th className="px-5 py-2.5 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {recentReports.map((r) => (
-                <tr key={r.id} className="transition-colors hover:bg-surface-2">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
-                        <FileText className="h-4 w-4" />
-                      </span>
-                      <span className="text-[13px] font-medium text-ink">{r.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.type}</td>
-                  <td className="px-5 py-3 text-[13px] text-ink-secondary">{r.period}</td>
-                  <td className="px-5 py-3 text-[13px] tabular-nums text-ink-tertiary">
-                    {formatDate(r.createdAt)}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    {r.status === 'ready' ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leftIcon={<Download className="h-3.5 w-3.5" />}
-                        onClick={() => toast({ tone: 'success', title: `Downloading ${r.name}` })}
-                      >
-                        {r.format}
-                      </Button>
-                    ) : (
-                      <Badge tone="warning" dot>
-                        Processing
-                      </Badge>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
       </div>
 
       {/* Both reports open here rather than sitting expanded on the page. The
