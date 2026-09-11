@@ -44,16 +44,18 @@ interface ReportTemplate {
 /** A library tile whose report opens in a dialog instead of a toast. */
 interface PanelShortcut extends ReportTemplate {}
 
-interface GeneratedReport {
-  id: string;
-  name: string;
-  type: string;
-  period: string;
-  createdAt: Date;
-  format: 'PDF' | 'XLSX' | 'CSV';
-  status: 'ready' | 'processing';
-}
-
+/**
+ * The three reports that generate through `ReportGeneratorModal`.
+ *
+ * Each opens a dialog to choose its subject (a mandate or a household), shows
+ * what the file will contain, and then writes it — the Holdings Statement
+ * through the firm's reference workbook builder, the other two through the
+ * shared PDF chrome every client-facing document uses.
+ *
+ * They previously called a `setTimeout` and toasted "generated" without writing
+ * anything, which is worse than a missing feature: an adviser had no way to
+ * tell the difference between a report that downloaded and one that did not.
+ */
 const templates: ReportTemplate[] = [
   {
     id: 'holdings-statement',
@@ -79,23 +81,16 @@ const templates: ReportTemplate[] = [
     cadence: 'Weekly',
     format: 'PDF',
   },
-  {
-    id: 'transactions',
-    title: 'Transaction Ledger',
-    description: 'Complete trade and cash activity log across accounts.',
-    icon: <CalendarClock className="h-5 w-5" />,
-    cadence: 'On demand',
-    format: 'CSV',
-  },
 ];
 
 /**
  * Capital Gains and the Fee Schedule are NOT cards in `templates`.
  *
- * The other templates fake a generate; these two are real reports with their
- * own subject and period controls and a working export. Generating one opens
- * it in a dialog, so the page stays a library of reports rather than a stack
- * of permanently-expanded tables the reader has to scroll past.
+ * They are equally real, but they carry their own subject and period controls
+ * and their own on-screen table, so each opens its existing purpose-built panel
+ * rather than the shared generator dialog. The page stays a library of reports
+ * either way, rather than a stack of permanently-expanded tables the reader has
+ * to scroll past.
  */
 const panelShortcuts: PanelShortcut[] = [
   {
@@ -116,21 +111,10 @@ const panelShortcuts: PanelShortcut[] = [
   },
 ];
 
-const now = new Date();
-const daysAgo = (n: number) => new Date(now.getTime() - n * 86400000);
-
-const recentReports: GeneratedReport[] = [
-  { id: 'r1', name: 'Performance Summary — Jun 2026', type: 'Performance', period: 'Jun 2026', createdAt: daysAgo(1), format: 'PDF', status: 'ready' },
-  { id: 'r2', name: 'Client Review Pack — Q2 2026', type: 'Client Review', period: 'Q2 2026', createdAt: daysAgo(2), format: 'PDF', status: 'ready' },
-  { id: 'r3', name: 'Holdings Statement — Hudson Family Office', type: 'Holdings', period: 'Jun 2026', createdAt: daysAgo(4), format: 'XLSX', status: 'ready' },
-  { id: 'r4', name: 'Risk & Exposure Report — Wk 26', type: 'Risk', period: 'Week 26', createdAt: daysAgo(6), format: 'PDF', status: 'processing' },
-  { id: 'r5', name: 'Transaction Ledger — May 2026', type: 'Transactions', period: 'May 2026', createdAt: daysAgo(11), format: 'CSV', status: 'ready' },
-];
-
 /** Sentinel for `exportingId` — the bulk export isn't any one client's row. */
 const ALL_EXPORT_ID = '__all__';
 
-const formatTone: Record<GeneratedReport['format'], any> = {
+const formatTone: Record<ReportTemplate['format'], any> = {
   PDF: 'danger',
   XLSX: 'success',
   CSV: 'info',
@@ -142,7 +126,8 @@ export default function ReportsPage() {
   // unit for the total, while each row renders in the client's own currency.
   const { market, meta, ready: marketReady } = useMarket();
   const currency = meta.currency;
-  const [generating, setGenerating] = useState<string | null>(null);
+  /** Which generator dialog is open, by report id. Null means none. */
+  const [openReport, setOpenReport] = useState<ReportId | null>(null);
   /** Which report dialog is open, by panel id. */
   const [openPanel, setOpenPanel] = useState<string | null>(null);
 
@@ -281,14 +266,6 @@ export default function ReportsPage() {
     : fees;
 
   const selectedQuarter = quarters.find((q) => q.code === quarter);
-
-  const handleGenerate = (tpl: ReportTemplate) => {
-    setGenerating(tpl.id);
-    setTimeout(() => {
-      setGenerating(null);
-      toast({ tone: 'success', title: `${tpl.title} generated`, description: `${tpl.format} ready to download` });
-    }, 900);
-  };
 
   const exportClientFee = async (fee: ClientFeeRow) => {
     setExportingId(fee.clientId);
