@@ -545,7 +545,7 @@ export default function ReportsPage() {
               <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
                 <th className="px-5 py-2.5">Client</th>
                 <th className="px-5 py-2.5 text-right">Annual Rate</th>
-                <th className="px-5 py-2.5 text-right">Portfolio Value</th>
+                <th className="px-5 py-2.5 text-right">Billable Capital</th>
                 <th className="px-5 py-2.5 text-right">Days Billed</th>
                 <th className="px-5 py-2.5 text-right">Fee Amount</th>
                 <th className="px-5 py-2.5">Status</th>
@@ -584,6 +584,17 @@ export default function ReportsPage() {
                     </td>
                     <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
                       {f.daysBilled} / {f.daysInQuarter}
+                      {/*
+                        The day-count above is the OPENING book's. Capital
+                        deployed mid-quarter is billed over its own, shorter
+                        window, so the row says how many such tranches exist
+                        rather than implying one number covers the whole fee.
+                      */}
+                      {f.segments.some((s) => s.kind === 'flow') && (
+                        <div className="text-[11px] text-ink-tertiary">
+                          +{f.segments.filter((s) => s.kind === 'flow').length} prorated
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
                       {formatCurrency(f.feeAmount, f.currency ?? currency)}
@@ -745,7 +756,7 @@ function FamilyInvoiceView({
           <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
             <th className="px-5 py-2.5">Account</th>
             <th className="px-5 py-2.5 text-right">Annual Rate</th>
-            <th className="px-5 py-2.5 text-right">Portfolio Value</th>
+            <th className="px-5 py-2.5 text-right">Billable Capital</th>
             <th className="px-5 py-2.5 text-right">Days Billed</th>
             <th className="px-5 py-2.5 text-right">Fee Amount</th>
           </tr>
@@ -769,6 +780,12 @@ function FamilyInvoiceView({
                 </td>
                 <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
                   {line.daysBilled} / {line.daysInQuarter}
+                  {/* See the fee table: the count is the opening book's alone. */}
+                  {line.segments.some((s) => s.kind === 'flow') && (
+                    <div className="text-[11px] text-ink-tertiary">
+                      +{line.segments.filter((s) => s.kind === 'flow').length} prorated
+                    </div>
+                  )}
                 </td>
                 <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
                   {formatCurrency(line.feeAmount, line.currency || money)}

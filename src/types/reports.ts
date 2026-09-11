@@ -1,18 +1,49 @@
+/**
+ * One billed component of a fee: the opening book, or one day's net capital
+ * deployment. Together they explain the total.
+ */
+export interface FeeSegment {
+  /** ISO date this component started billing from. */
+  from: string;
+  kind: 'opening' | 'flow';
+  /** Capital billed. Negative for a net sell day, which reduces the fee. */
+  amount: number;
+  days: number;
+  fee: number;
+}
+
 export interface ClientFeeRow {
   clientId: string;
   clientName: string;
   feeRatePercent: number;
+  /**
+   * The capital the fee was charged against: the opening book plus capital
+   * deployed during the quarter. Not quarter-end NAV — market movement on
+   * already-billed capital does not change the base.
+   */
   portfolioValue: number;
+  /** The book at quarter start. Null on rows frozen before proration shipped. */
+  openingValue: number | null;
+  /**
+   * Why the fee is the number it is. Empty on rows frozen before segmented
+   * proration shipped — those carry only a total.
+   */
+  segments: FeeSegment[];
   /** Canonical quarter code, e.g. "Q3-CY26". */
   quarter: string;
   quarterLabel: string;
   quarterStart: string;
   quarterEnd: string;
+  /**
+   * Days the OPENING book was billed for. Capital deployed later carries its
+   * own day-count in `segments` — this number does not describe it, so it
+   * must never be shown as though it were the whole story.
+   */
   daysBilled: number;
   daysInQuarter: number;
   /**
-   * True for a quarter still in progress — portfolioValue is today's live
-   * value. False means the row came from a frozen fee record: the amount
+   * True for a quarter still in progress — the figures run to today and will
+   * change. False means the row came from a frozen fee record: the amount
    * actually billed for that closed quarter.
    */
   isEstimate: boolean;

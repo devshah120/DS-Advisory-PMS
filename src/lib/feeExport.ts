@@ -4,8 +4,13 @@ import { formatDate } from './utils';
 
 const LABEL_FILL: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
 
+/**
+ * Where the OPENING book came from — the base the fee prorates forward from.
+ * ('live' is retained for fee rows frozen before proration shipped, which
+ * valued an open quarter on live holdings.)
+ */
 const VALUATION_SOURCE_LABEL: Record<string, string> = {
-  snapshot: 'Quarter-end snapshot (recorded on the day)',
+  snapshot: 'Opening snapshot (recorded on the day)',
   reconstruction: 'Reconstructed from baseline + transactions',
   live: 'Live holdings (quarter still open)',
   unavailable: 'Unavailable — no baseline to value from',
@@ -34,6 +39,36 @@ const CURRENCY_FORMATS: Record<string, { numFmt: string; locale: string }> = {
 
 function currencyFormat(currency: string | undefined) {
   return CURRENCY_FORMATS[currency ?? 'USD'] ?? CURRENCY_FORMATS.USD;
+}
+
+/**
+ * The day-count to show for one account.
+ *
+ * `daysBilled` describes the OPENING book only. Once capital has been deployed
+ * mid-quarter, each tranche carries its own day-count, and printing the
+ * opening figure alone would state that the whole fee was billed over those
+ * days — the precise misreading this proration exists to correct. So an
+ * account with flows is marked as having several, and the Account Detail tab
+ * carries the breakdown.
+ */
+function daysBilledLabel(line: ClientFeeRow): string {
+  const flows = line.segments.filter((s) => s.kind === 'flow').length;
+  const base = `${line.daysBilled} / ${line.daysInQuarter}`;
+  return flows > 0 ? `${base} +${flows} tranche${flows === 1 ? '' : 's'}` : base;
+}
+
+/**
+ * The proration the account was ACTUALLY charged at, back-solved from the fee.
+ *
+ * Not days ÷ days-in-quarter: with capital deployed mid-quarter the fee is a
+ * sum over tranches with different day-counts, and no single ratio of days
+ * produces it. Dividing the billed fee by what a full quarter on the same
+ * capital would have cost gives the one number that reconciles.
+ */
+function effectiveProration(line: ClientFeeRow): number | string {
+  const fullQuarter = line.portfolioValue * (line.feeRatePercent / 100 / 4);
+  if (fullQuarter <= 0) return '';
+  return line.feeAmount / fullQuarter;
 }
 
 /**
@@ -67,20 +102,28 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
 
   sheet.addRow([]);
 
-  // A closed quarter is billed on its locked quarter-end NAV; an open one can
-  // only show today's moving value. Labelling the row tells the reader which
-  // they are looking at, so an estimate is never mistaken for an invoice.
+  // A closed quarter's figures are locked; an open one runs to today.
+  // Labelling the row tells the reader which they are looking at, so an
+  // estimate is never mistaken for an invoice.
   const valueLabel = fee.isEstimate
-    ? 'Portfolio value (live, quarter in progress)'
-    : 'Portfolio value (quarter-end)';
+    ? 'Billable capital (quarter in progress)'
+    : 'Billable capital';
 
   const rows: Array<[string, string | number, string?]> = [
     ['Annual fee rate', fee.feeRatePercent / 100, '0.00%'],
-    [valueLabel, fee.portfolioValue, money.numFmt],
-    ['Days billed this quarter', `${fee.daysBilled} / ${fee.daysInQuarter}`],
     ['Quarterly rate (annual ÷ 4)', fee.feeRatePercent / 100 / 4, '0.0000%'],
-    ['Proration (days billed ÷ days in quarter)', fee.daysBilled / fee.daysInQuarter, '0.00%'],
   ];
+
+  // The opening book is only a separate line when there IS a breakdown to
+  // separate it from. On a pre-proration row it would be an empty cell.
+  if (fee.openingValue !== null) {
+    rows.push(['Opening book (start of quarter)', fee.openingValue, money.numFmt]);
+  }
+
+  rows.push(
+    [valueLabel, fee.portfolioValue, money.numFmt],
+    ['Days billed (opening book)', `${fee.daysBilled} / ${fee.daysInQuarter}`],
+  );
 
   for (const [label, value, format] of rows) {
     const row = sheet.addRow([label, value]);
@@ -121,19 +164,62 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   sheet.addRow([]);
 
   const formula = sheet.addRow([
-    'Fee = Portfolio value × (annual rate ÷ 4) × (days billed ÷ days in quarter)',
+    fee.segments.length > 0
+      ? 'Fee = Σ (capital × (annual rate ÷ 4) × (days at work ÷ days in quarter))'
+      : 'Fee = Portfolio value × (annual rate ÷ 4) × (days billed ÷ days in quarter)',
   ]);
   formula.font = { italic: true, size: 10, color: { argb: 'FF6B7280' } };
   sheet.mergeCells(formula.number, 1, formula.number, 2);
 
-  const substituted = sheet.addRow([
-    `= ${fee.portfolioValue.toLocaleString(money.locale, {
-      style: 'currency',
-      currency: fee.currency ?? 'USD',
-    })} × ` + `(${fee.feeRatePercent}% ÷ 4) × (${fee.daysBilled} ÷ ${fee.daysInQuarter})`,
-  ]);
-  substituted.font = { size: 10 };
-  sheet.mergeCells(substituted.number, 1, substituted.number, 2);
+  /**
+   * The segment table is the whole point of the export.
+   *
+   * It is the answer to "why am I being charged this?" — and specifically to
+   * the question a client asks when they add money late in a quarter: capital
+   * deployed on the 11th shows 20 days, not the full 92, on its own line.
+   */
+  if (fee.segments.length > 0) {
+    sheet.addRow([]);
+    const segHeader = sheet.addRow(['Billed from', 'Capital']);
+    segHeader.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+    segHeader.eachCell((cell, col) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111827' } };
+      cell.border = THIN_BORDER;
+      cell.alignment = { horizontal: col === 1 ? 'left' : 'right' };
+    });
+
+    for (const seg of fee.segments) {
+      const label =
+        seg.kind === 'opening'
+          ? `${formatDate(seg.from)} — opening book`
+          : `${formatDate(seg.from)} — ${seg.amount >= 0 ? 'deployed' : 'withdrawn'}`;
+
+      const row = sheet.addRow([label, seg.amount]);
+      row.getCell(2).numFmt = money.numFmt;
+      row.eachCell((cell, col) => {
+        cell.border = THIN_BORDER;
+        cell.alignment = { horizontal: col === 1 ? 'left' : 'right' };
+      });
+
+      const detail = sheet.addRow([
+        `      ${seg.days} of ${fee.daysInQuarter} days × (${fee.feeRatePercent}% ÷ 4)`,
+        seg.fee,
+      ]);
+      detail.getCell(1).font = { size: 9, color: { argb: 'FF6B7280' } };
+      detail.getCell(2).numFmt = money.numFmt;
+      detail.getCell(2).font = { size: 9, color: { argb: 'FF6B7280' } };
+      detail.getCell(2).alignment = { horizontal: 'right' };
+    }
+  } else {
+    const substituted = sheet.addRow([
+      `= ${fee.portfolioValue.toLocaleString(money.locale, {
+        style: 'currency',
+        currency: fee.currency ?? 'USD',
+      })} × ` + `(${fee.feeRatePercent}% ÷ 4) × (${fee.daysBilled} ÷ ${fee.daysInQuarter})`,
+    ]);
+    substituted.font = { size: 10 };
+    sheet.mergeCells(substituted.number, 1, substituted.number, 2);
+  }
 
   const result = sheet.addRow([
     `= ${fee.feeAmount.toLocaleString(money.locale, {
@@ -143,6 +229,23 @@ export async function buildClientFeeWorkbook(fee: ClientFeeRow): Promise<ExcelJS
   ]);
   result.font = { bold: true, size: 10 };
   sheet.mergeCells(result.number, 1, result.number, 2);
+
+  /**
+   * The method, stated in the client's own words. A fee document that shows a
+   * prorated number without saying it prorates invites the exact dispute the
+   * proration was built to prevent.
+   */
+  if (fee.segments.some((s) => s.kind === 'flow')) {
+    sheet.addRow([]);
+    const note = sheet.addRow([
+      'Capital added during the quarter is charged only for the days it was invested, ' +
+        'not for the full quarter.',
+    ]);
+    note.font = { size: 9, italic: true, color: { argb: 'FF6B7280' } };
+    note.alignment = { wrapText: true, vertical: 'top' };
+    sheet.mergeCells(note.number, 1, note.number, 2);
+    sheet.getRow(note.number).height = 26;
+  }
 
   return wb;
 }
@@ -227,10 +330,10 @@ export async function buildFamilyInvoiceWorkbook(
   // --- line items, one per member account -----------------------------------
   const header = sheet.addRow([
     'Account',
-    invoice.isEstimate ? 'Portfolio value (live)' : 'Portfolio value (quarter-end)',
+    invoice.isEstimate ? 'Billable capital (to date)' : 'Billable capital',
     'Annual rate',
     'Days billed',
-    'Proration',
+    'Effective proration',
     'Fee',
   ]);
   header.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
@@ -249,8 +352,8 @@ export async function buildFamilyInvoiceWorkbook(
       line.clientName,
       line.portfolioValue,
       line.feeRatePercent / 100,
-      `${line.daysBilled} / ${line.daysInQuarter}`,
-      line.daysBilled / line.daysInQuarter,
+      daysBilledLabel(line),
+      effectiveProration(line),
       line.feeAmount,
     ]);
 
@@ -336,15 +439,17 @@ export async function buildFamilyInvoiceWorkbook(
   workingTitle.font = { bold: true, size: 11 };
 
   const formula = sheet.addRow([
-    'Fee per account = Portfolio value × (annual rate ÷ 4) × (days billed ÷ days in quarter)',
+    'Fee per account = Σ (capital × (annual rate ÷ 4) × (days at work ÷ days in quarter))',
   ]);
   formula.font = { italic: true, size: 10, color: { argb: 'FF6B7280' } };
   sheet.mergeCells(formula.number, 1, formula.number, 6);
 
   const summed = sheet.addRow([
     'Household total = the sum of the account fees above. Each account is billed at its own ' +
-      'rate and prorated by its own inception date, so this invoice reconciles line-for-line ' +
-      'with each account’s individual fee statement.',
+      'rate, prorated by its own inception date, and capital added during the quarter is ' +
+      'charged only for the days it was invested — so this invoice reconciles line-for-line ' +
+      'with each account’s individual fee statement. See the Account Detail tab for the ' +
+      'tranche-by-tranche working.',
   ]);
   summed.font = { size: 10, color: { argb: 'FF6B7280' } };
   summed.alignment = { wrapText: true, vertical: 'top' };
@@ -395,9 +500,9 @@ function writeAccountDetailSheet(
 
   const header = sheet.addRow([
     'Account',
-    'Portfolio value',
+    'Capital',
     'Annual rate',
-    'Days billed',
+    'Days at work',
     'Proration',
     'Fee',
     'Calculation',
@@ -410,18 +515,24 @@ function writeAccountDetailSheet(
     cell.alignment = { horizontal: col === 1 || col >= 7 ? 'left' : 'right' };
   });
 
+  const asMoney = (n: number) =>
+    n.toLocaleString(money.locale, {
+      style: 'currency',
+      currency: invoice.currency ?? 'USD',
+    });
+
   for (const line of invoice.lines) {
     const row = sheet.addRow([
       line.clientName,
       line.portfolioValue,
       line.feeRatePercent / 100,
-      `${line.daysBilled} / ${line.daysInQuarter}`,
-      line.daysBilled / line.daysInQuarter,
+      daysBilledLabel(line),
+      effectiveProration(line),
       line.feeAmount,
-      `${line.portfolioValue.toLocaleString(money.locale, {
-        style: 'currency',
-        currency: line.currency ?? 'USD',
-      })} × (${line.feeRatePercent}% ÷ 4) × (${line.daysBilled} ÷ ${line.daysInQuarter})`,
+      line.segments.length > 0
+        ? `Σ of ${line.segments.length} tranche${line.segments.length === 1 ? '' : 's'} below`
+        : `${asMoney(line.portfolioValue)} × (${line.feeRatePercent}% ÷ 4) × ` +
+          `(${line.daysBilled} ÷ ${line.daysInQuarter})`,
       VALUATION_SOURCE_LABEL[line.valuationSource] ?? line.valuationSource,
     ]);
     row.getCell(2).numFmt = money.numFmt;
@@ -434,6 +545,35 @@ function writeAccountDetailSheet(
       cell.border = THIN_BORDER;
       cell.alignment = { horizontal: col === 1 || col >= 7 ? 'left' : 'right' };
     });
+
+    /**
+     * One indented row per tranche — this is the audit trail. A client who
+     * added money mid-quarter can point at the line and see the day-count it
+     * was actually billed over.
+     */
+    for (const seg of line.segments) {
+      const detail = sheet.addRow([
+        seg.kind === 'opening'
+          ? `      opening book, from ${formatDate(seg.from)}`
+          : `      ${seg.amount >= 0 ? 'deployed' : 'withdrawn'} ${formatDate(seg.from)}`,
+        seg.amount,
+        line.feeRatePercent / 100 / 4,
+        `${seg.days} / ${line.daysInQuarter}`,
+        seg.days / line.daysInQuarter,
+        seg.fee,
+        `${asMoney(seg.amount)} × (${line.feeRatePercent}% ÷ 4) × (${seg.days} ÷ ${line.daysInQuarter})`,
+        '',
+      ]);
+      detail.getCell(2).numFmt = money.numFmt;
+      detail.getCell(3).numFmt = '0.0000%';
+      detail.getCell(5).numFmt = '0.00%';
+      detail.getCell(6).numFmt = money.numFmt;
+      detail.eachCell((cell, col) => {
+        cell.font = { size: 9, color: { argb: 'FF6B7280' } };
+        cell.border = THIN_BORDER;
+        cell.alignment = { horizontal: col === 1 || col >= 7 ? 'left' : 'right' };
+      });
+    }
   }
 
   const total = sheet.addRow([
