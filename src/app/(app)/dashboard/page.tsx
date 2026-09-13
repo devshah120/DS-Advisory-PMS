@@ -75,8 +75,12 @@ export default function DashboardPage() {
   return (
     <>
       <div className="space-y-6">
-        {/* ---- KPI row ---- */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* ---- KPI row ----
+            Client logins drop the Total Clients card, leaving three — one
+            column short of a Total Clients column would sit empty in the
+            4-column staff layout, so those sessions get a 3-column grid
+            instead. */}
+        <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2', isClientLogin ? 'lg:grid-cols-3' : 'lg:grid-cols-4')}>
           {overviewLoading || !overview ? (
             <>
               <KpiSkeleton />

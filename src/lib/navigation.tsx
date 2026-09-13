@@ -12,7 +12,6 @@ import {
   Gauge,
   Newspaper,
   CreditCard,
-  Split,
   type LucideIcon,
 } from 'lucide-react';
 import { isSuperAdmin, type UserRole } from '@/types';
@@ -66,12 +65,6 @@ export const navSections: NavSection[] = [
     items: [
       { label: 'Watchlist', href: '/watchlist', icon: Eye },
       { label: 'Event Center', href: '/events', icon: CalendarClock },
-      // Sits beside Event Center because the two answer adjacent questions:
-      // "what is coming up for these names" and "what has actually happened to
-      // them that changes a client's position". No role gate — a manager needs
-      // to see actions affecting their own book, and the API scopes the
-      // affected-client counts to what they may see.
-      { label: 'Corporate Actions', href: '/corporate-actions', icon: Split },
       { label: 'News Center', href: '/news', icon: Newspaper },
       { label: 'Fundamentals', href: '/fundamentals', icon: Gauge },
       { label: 'Performance', href: '/performance', icon: LineChart },
