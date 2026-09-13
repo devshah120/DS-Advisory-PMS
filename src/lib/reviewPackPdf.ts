@@ -22,7 +22,6 @@ import {
   moneyFormatter,
   NAVY,
   newDoc,
-  PAGE_H,
   PAGE_W,
   pct,
   stampPageNumbers,

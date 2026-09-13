@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, FileWarning, Info } from 'lucide-react';
+import { AlertTriangle, Download, FileWarning, Info, Sparkles } from 'lucide-react';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Badge, Button, EmptyState, Modal, Select, Skeleton, Textarea, useToast } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -14,10 +14,10 @@ import {
   type SubjectValue,
 } from '@/lib/reportSubject';
 import { analyseRisk, downloadRiskReportPdf, type RiskAnalysis } from '@/lib/riskReportPdf';
-import { downloadReviewPackPdf } from '@/lib/reviewPackPdf';
 import { downloadClientHoldingsWorkbook, downloadFamilyHoldingsWorkbook, type HoldingsExportRow } from '@/lib/holdingsExport';
 import { portfolioHistoryApi, type PeriodOption, type PeriodReturn } from '@/lib/portfolio-history.api';
 import { familyPerformanceApi } from '@/lib/family-performance.api';
+import { reviewPackApi, type ReviewPack } from '@/lib/review-pack.api';
 
 /**
  * The generate dialog behind the Holdings Statement, Client Review Pack and
@@ -104,6 +104,17 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'da
   );
 }
 
+/** One read-only commentary paragraph in the AI preview — spec §103. */
+function CommentarySection({ title, text }: { title: string; text?: string | null }) {
+  if (!text) return null;
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">{title}</p>
+      <p className="text-[13px] leading-relaxed text-ink-secondary">{text}</p>
+    </div>
+  );
+}
+
 export function ReportGeneratorModal({
   reportId,
   onClose,
@@ -125,8 +136,15 @@ export function ReportGeneratorModal({
   const [periodReturn, setPeriodReturn] = useState<PeriodReturn | null>(null);
   const [periodLoading, setPeriodLoading] = useState(false);
 
-  const [commentary, setCommentary] = useState('');
   const [generating, setGenerating] = useState(false);
+
+  // AI Portfolio Commentary — client-review only. `stage` drives the progress
+  // copy from spec §73; `pack` is the persisted ReviewPack once generated.
+  const [pack, setPack] = useState<ReviewPack | null>(null);
+  const [stage, setStage] = useState<'idle' | 'analyzing' | 'macro' | 'writing' | 'ready'>('idle');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [editingCommentary, setEditingCommentary] = useState(false);
+  const [draftEdits, setDraftEdits] = useState({ portfolioCommentary: '', macroCommentary: '', positioningCommentary: '' });
 
   const spec = reportId ? REPORTS[reportId] : null;
   const isOpen = reportId !== null;
@@ -261,8 +279,97 @@ export function ReportGeneratorModal({
   // Commentary is per-report-run, not per-subject: carrying one client's
   // paragraph over to the next client's pack is the worst possible bug here.
   useEffect(() => {
-    setCommentary('');
-  }, [subjectValue, reportId]);
+    setPack(null);
+    setStage('idle');
+    setEditingCommentary(false);
+  }, [subjectValue, reportId, period]);
+
+  /**
+   * Runs the Automated Review Pack workflow — spec §66/§73. The progress
+   * copy is cosmetic (the backend call is one round trip), but a manager
+   * clicking Generate on a client-facing document should see it's actually
+   * doing something rather than staring at a spinner for a few seconds.
+   */
+  const handleGenerateCommentary = async () => {
+    const decoded = subjectValue ? decodeSubject(subjectValue) : null;
+    if (!decoded || !period) return;
+
+    setAiBusy(true);
+    setStage('analyzing');
+    try {
+      await new Promise((r) => setTimeout(r, 350));
+      setStage('macro');
+      await new Promise((r) => setTimeout(r, 250));
+      setStage('writing');
+
+      const result = await reviewPackApi.generate(decoded.kind, decoded.id, period);
+      setPack(result);
+      setStage('ready');
+    } catch {
+      toast({ tone: 'error', title: 'Could not generate commentary' });
+      setStage('idle');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const handleRegenerateCommentary = async () => {
+    if (!pack) return;
+    setAiBusy(true);
+    setStage('writing');
+    try {
+      const result = await reviewPackApi.regenerate(pack.id);
+      setPack(result);
+      setStage('ready');
+      setEditingCommentary(false);
+      toast({ tone: 'success', title: 'Commentary regenerated' });
+    } catch {
+      toast({ tone: 'error', title: 'Could not regenerate commentary' });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const startEditingCommentary = () => {
+    if (!pack) return;
+    setDraftEdits({
+      portfolioCommentary: pack.portfolioCommentary ?? '',
+      macroCommentary: pack.macroCommentary ?? '',
+      positioningCommentary: pack.positioningCommentary ?? '',
+    });
+    setEditingCommentary(true);
+  };
+
+  const saveCommentaryEdits = async () => {
+    if (!pack) return;
+    setAiBusy(true);
+    try {
+      const result = await reviewPackApi.editCommentary(pack.id, draftEdits);
+      setPack(result);
+      setEditingCommentary(false);
+      toast({ tone: 'success', title: 'Commentary updated' });
+    } catch {
+      toast({ tone: 'error', title: 'Could not save your edits' });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const handleApproveAndDownload = async () => {
+    if (!pack || !data) return;
+    setAiBusy(true);
+    try {
+      const approved = await reviewPackApi.approve(pack.id);
+      setPack(approved);
+      await reviewPackApi.downloadPdf(approved.id, `${data.name.replace(/[^\w]+/g, '_')}-review-${period}.pdf`);
+      toast({ tone: 'success', title: 'Review pack approved', description: `${data.name} · PDF downloaded` });
+      onClose();
+    } catch {
+      toast({ tone: 'error', title: 'Could not approve or download the review pack' });
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const analysis: RiskAnalysis | null = useMemo(() => {
     if (!data) return null;
@@ -310,18 +417,6 @@ export function ReportGeneratorModal({
         } else {
           await downloadClientHoldingsWorkbook(data.name, rows, data.cashBalance);
         }
-      } else if (reportId === 'client-review') {
-        downloadReviewPackPdf({
-          subject: data.name,
-          subjectKind: data.kind,
-          currency: data.currency,
-          asOf,
-          periodReturn,
-          positions: data.positions,
-          cashBalance: data.cashBalance,
-          commentary,
-          memberCount: data.memberCount,
-        });
       } else {
         downloadRiskReportPdf({
           subject: data.name,
@@ -541,17 +636,128 @@ export function ReportGeneratorModal({
                   </div>
                 )}
 
-                <label className="block">
-                  <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                    Commentary <span className="normal-case text-ink-tertiary">(optional)</span>
-                  </span>
-                  <Textarea
-                    rows={4}
-                    value={commentary}
-                    onChange={(e) => setCommentary(e.target.value)}
-                    placeholder="What drove the quarter, what you changed, and what you are watching. Printed verbatim in the pack."
-                  />
-                </label>
+                <div className="rounded-[10px] border border-border bg-surface-2 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI Portfolio Commentary
+                    </span>
+                    {pack && (
+                      <Badge tone={pack.status === 'APPROVED' ? 'success' : 'warning'}>
+                        {pack.status === 'APPROVED' ? 'Approved' : pack.status}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {stage === 'idle' && (
+                    <div className="space-y-3">
+                      <p className="text-[12px] leading-relaxed text-ink-secondary">
+                        Generates a professional commentary from this portfolio's verified return, benchmark,
+                        contributors and allocation — no numbers are invented, only written up.
+                      </p>
+                      <Button
+                        variant="outline"
+                        onClick={handleGenerateCommentary}
+                        disabled={aiBusy || !period}
+                        leftIcon={<Sparkles className="h-4 w-4" />}
+                      >
+                        Generate Commentary
+                      </Button>
+                    </div>
+                  )}
+
+                  {(stage === 'analyzing' || stage === 'macro' || stage === 'writing') && (
+                    <div className="flex items-center gap-2 py-2 text-[13px] text-ink-secondary">
+                      <Skeleton className="h-4 w-4 rounded-full" />
+                      {stage === 'analyzing' && 'Analyzing portfolio…'}
+                      {stage === 'macro' && 'Preparing market data…'}
+                      {stage === 'writing' && 'Generating commentary…'}
+                    </div>
+                  )}
+
+                  {stage === 'ready' && pack && !editingCommentary && (
+                    <div className="space-y-3">
+                      {pack.headline && <p className="text-[13px] font-semibold text-ink">{pack.headline}</p>}
+
+                      <CommentarySection title="Portfolio Commentary" text={pack.portfolioCommentary} />
+                      <CommentarySection title="Market & Macro" text={pack.macroCommentary} />
+                      <CommentarySection title="Portfolio Positioning" text={pack.positioningCommentary} />
+
+                      {pack.keyPoints.length > 0 && (
+                        <div>
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                            Key Points
+                          </p>
+                          <ul className="list-inside list-disc space-y-0.5 text-[13px] text-ink-secondary">
+                            {pack.keyPoints.map((pt, i) => (
+                              <li key={i}>{pt}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                        <Button variant="outline" size="sm" onClick={startEditingCommentary} disabled={aiBusy}>
+                          Edit
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={handleRegenerateCommentary} loading={aiBusy}>
+                          Regenerate
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleApproveAndDownload}
+                          loading={aiBusy}
+                          leftIcon={<Download className="h-4 w-4" />}
+                        >
+                          Approve &amp; Download PDF
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {stage === 'ready' && pack && editingCommentary && (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                          Portfolio Commentary
+                        </span>
+                        <Textarea
+                          rows={4}
+                          value={draftEdits.portfolioCommentary}
+                          onChange={(e) => setDraftEdits((d) => ({ ...d, portfolioCommentary: e.target.value }))}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                          Market &amp; Macro
+                        </span>
+                        <Textarea
+                          rows={3}
+                          value={draftEdits.macroCommentary}
+                          onChange={(e) => setDraftEdits((d) => ({ ...d, macroCommentary: e.target.value }))}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                          Portfolio Positioning
+                        </span>
+                        <Textarea
+                          rows={3}
+                          value={draftEdits.positioningCommentary}
+                          onChange={(e) => setDraftEdits((d) => ({ ...d, positioningCommentary: e.target.value }))}
+                        />
+                      </label>
+                      <div className="flex items-center gap-2 border-t border-border pt-3">
+                        <Button variant="outline" size="sm" onClick={() => setEditingCommentary(false)} disabled={aiBusy}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={saveCommentaryEdits} loading={aiBusy}>
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -596,19 +802,22 @@ export function ReportGeneratorModal({
           </div>
         )}
 
-        {/* Actions */}
+        {/* Actions — the review pack's Approve & Download button lives inline
+            above instead, since that action also approves the commentary. */}
         <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            onClick={handleGenerate}
-            disabled={!data || generating || loading}
-            loading={generating}
-            leftIcon={<Download className="h-4 w-4" />}
-          >
-            Download {spec.format}
-          </Button>
+          {reportId !== 'client-review' && (
+            <Button
+              onClick={handleGenerate}
+              disabled={!data || generating || loading}
+              loading={generating}
+              leftIcon={<Download className="h-4 w-4" />}
+            >
+              Download {spec.format}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>
