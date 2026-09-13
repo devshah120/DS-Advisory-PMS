@@ -7,6 +7,7 @@ import { formatCompactCurrency, formatCurrency, formatSignedPct, cn } from '@/li
 import { DashboardOverview, MarketQuote, HoldingMover, ClientMover } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
+import { useSession } from '@/components/layout/SessionContext';
 import { Card, CardHeader, StatCard, Skeleton, useToast } from '@/components/ui';
 import { SectorPieChart, TopHoldingsList } from '@/components/charts';
 
@@ -18,6 +19,11 @@ export default function DashboardPage() {
   // commodity strip. They were both called "market" before the second book
   // existed, which is exactly the sort of collision worth naming away.
   const { market, meta, ready: marketReady } = useMarket();
+  // Client-portal logins (role `viewer`) only ever see their own book, so a
+  // firm-wide client count is meaningless to them — drop the card entirely
+  // rather than show a number that doesn't describe their world.
+  const { role } = useSession();
+  const isClientLogin = role === 'viewer';
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [quotes, setQuotes] = useState<MarketQuote[]>([]);
@@ -75,7 +81,7 @@ export default function DashboardPage() {
             <>
               <KpiSkeleton />
               <KpiSkeleton />
-              <KpiSkeleton />
+              {!isClientLogin && <KpiSkeleton />}
               <KpiSkeleton />
             </>
           ) : (
@@ -101,14 +107,16 @@ export default function DashboardPage() {
                     : undefined
                 }
               />
-              <StatCard
-                index={2}
-                label="Total Clients"
-                value={overview.numClients}
-                format={(n) => String(n)}
-                icon={<Users className="h-4 w-4" />}
-                accent="neutral"
-              />
+              {!isClientLogin && (
+                <StatCard
+                  index={2}
+                  label="Total Clients"
+                  value={overview.numClients}
+                  format={(n) => String(n)}
+                  icon={<Users className="h-4 w-4" />}
+                  accent="neutral"
+                />
+              )}
               <StatCard
                 index={3}
                 label="Holdings"
@@ -176,11 +184,25 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* ---- Market overview / Client day change ---- */}
-        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
+        {/* ---- Market overview ----
+            Client logins get one full-width card: their own portfolio's day
+            change belongs here instead of in a separate "Client Day Change"
+            card, since that card's per-client breakdown has nothing to show
+            them beyond the single row that is already their own account. */}
+        <div className={cn('grid grid-cols-1 items-stretch gap-6', !isClientLogin && 'lg:grid-cols-2')}>
           <Card>
             <CardHeader title="Market Overview" subtitle="Indices and commodities, daily and year-to-date" />
             <div className="mt-5 space-y-6">
+              {isClientLogin && (
+                <div>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Your Portfolio</p>
+                  <ClientMoversTable
+                    rows={overview?.clientMovers}
+                    loading={overviewLoading}
+                    currency={currency}
+                  />
+                </div>
+              )}
               <div>
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-tertiary">Indices</p>
                 <QuoteTable quotes={indices} loading={marketLoading} />
@@ -192,16 +214,18 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card className="flex flex-col">
-            <CardHeader title="Client Day Change" subtitle="Each client's portfolio, today vs. prior close" />
-            <div className="mt-4">
-              <ClientMoversTable
-                rows={overview?.clientMovers}
-                loading={overviewLoading}
-                currency={currency}
-              />
-            </div>
-          </Card>
+          {!isClientLogin && (
+            <Card className="flex flex-col">
+              <CardHeader title="Client Day Change" subtitle="Each client's portfolio, today vs. prior close" />
+              <div className="mt-4">
+                <ClientMoversTable
+                  rows={overview?.clientMovers}
+                  loading={overviewLoading}
+                  currency={currency}
+                />
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </>

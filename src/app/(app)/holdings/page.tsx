@@ -43,6 +43,7 @@ import {
 import { Holding, Client, Family, FamilyAggregate, FamilyPosition, Transaction } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
+import { useSession } from '@/components/layout/SessionContext';
 import {
   Card,
   Tabs,
@@ -287,6 +288,11 @@ export default function HoldingsPage() {
   const [allClients, setAllClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'symbols' | 'clients' | 'sectors' | 'all'>('symbols');
+  // Client-portal logins (role `viewer`) see only their own book, so a
+  // per-client breakdown and the unaggregated all-positions list are both
+  // meaningless — every row would be theirs anyway.
+  const { role } = useSession();
+  const isClientLogin = role === 'viewer';
   const [activeClient, setActiveClient] = useState<ClientRow | null>(null);
   const [activeSector, setActiveSector] = useState<SectorRow | null>(null);
   const [activeSymbol, setActiveSymbol] = useState<SymbolRow | null>(null);
@@ -1957,9 +1963,9 @@ export default function HoldingsPage() {
           <Tabs
             tabs={[
               { value: 'symbols', label: 'By Symbol', count: symbolRows.length },
-              { value: 'clients', label: 'By Client', count: clientRows.length },
+              ...(isClientLogin ? [] : [{ value: 'clients', label: 'By Client', count: clientRows.length }]),
               { value: 'sectors', label: 'By Sector', count: sectorRows.length },
-              { value: 'all', label: 'All Positions', count: holdings.length },
+              ...(isClientLogin ? [] : [{ value: 'all', label: 'All Positions', count: holdings.length }]),
             ]}
             value={view}
             onChange={(v) => setView(v as typeof view)}

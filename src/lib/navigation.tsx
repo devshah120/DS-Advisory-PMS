@@ -17,6 +17,11 @@ import {
 } from 'lucide-react';
 import { isSuperAdmin, type UserRole } from '@/types';
 
+// Client-portal logins are role `viewer` (see users/page.tsx). They land on
+// their own book already, so a screen for managing every client in the firm
+// has nothing for them to do there.
+const isNotClientLogin = (role: UserRole | null | undefined) => role !== 'viewer';
+
 export interface NavItem {
   label: string;
   href: string;
@@ -45,7 +50,7 @@ export const navSections: NavSection[] = [
   {
     title: 'Manage',
     items: [
-      { label: 'Clients', href: '/clients', icon: Users },
+      { label: 'Clients', href: '/clients', icon: Users, visible: isNotClientLogin },
       { label: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
       // Route stays /users — renaming the path would break bookmarks and the
       // API's own /users endpoints for no gain. Only the label changed.
