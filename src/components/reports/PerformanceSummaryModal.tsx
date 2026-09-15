@@ -16,7 +16,7 @@ import {
 } from '@/lib/family-performance.api';
 import { Client, Family } from '@/types';
 import { useMarket } from '@/components/layout/MarketContext';
-import { isUsableRange, rangeHint, todayIso, INCEPTION_ISO } from '@/lib/custom-range';
+import { isUsableRange, rangeHint, todayIso, DEFAULT_INCEPTION_ISO } from '@/lib/custom-range';
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Modal, Select, Skeleton, useToast } from '@/components/ui';
 
@@ -75,6 +75,11 @@ export function PerformanceSummaryModal({
   const [subject, setSubject] = useState<Subject | null>(null);
 
   const [options, setOptions] = useState<PeriodOption[]>([]);
+  /**
+   * The floor for this modal's date pickers: the selected client's own
+   * inception, carried on every period option. See availablePeriods (server).
+   */
+  const inceptionIso = options[0]?.inceptionIso ?? DEFAULT_INCEPTION_ISO;
   const [period, setPeriod] = useState('QTD');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState(todayIso());
@@ -172,7 +177,7 @@ export function PerformanceSummaryModal({
       // A half-typed custom range is a keystroke, not a request — see
       // custom-range.ts. Hold the previous figures on screen until the pair is
       // complete rather than fetching the year 26 AD.
-      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo)) {
+      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo, inceptionIso)) {
         setResult(null);
         setAsOf(null);
         setLoading(false);
@@ -262,7 +267,8 @@ export function PerformanceSummaryModal({
     [currency],
   );
 
-  const customInvalid = period === 'CUSTOM' ? rangeHint(customFrom, customTo) : null;
+  const customInvalid =
+    period === 'CUSTOM' ? rangeHint(customFrom, customTo, inceptionIso) : null;
 
   /**
    * Generate stays disabled until there is a measured window behind it.
@@ -416,7 +422,7 @@ export function PerformanceSummaryModal({
                 <Input
                   type="date"
                   label="From"
-                  min={INCEPTION_ISO}
+                  min={inceptionIso}
                   max={todayIso()}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
@@ -424,7 +430,7 @@ export function PerformanceSummaryModal({
                 <Input
                   type="date"
                   label="To"
-                  min={INCEPTION_ISO}
+                  min={inceptionIso}
                   max={todayIso()}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}

@@ -14,15 +14,21 @@
  */
 
 /**
- * The house inception — the earliest date the book has priced history for.
+ * The fallback floor, used ONLY until the client's own inception has loaded.
  *
- * Mirrors INCEPTION_DATE / JUN30_REBASE_DATE on the server
- * (analytics/calculators/flows.ts). Duplicated as a literal rather than fetched
- * because it is a fixed historical fact about this book, and the cost of it
- * being wrong here is only a bound on a date picker — the server clamps
- * independently and remains the authority.
+ * This used to be the floor for everybody, on the reasoning that 30-June-2026
+ * was a fixed historical fact about the book and a wrong bound here would cost
+ * nothing because the server clamps independently. Both halves were wrong. It
+ * is not a fact about every client — a mandate can start earlier — and the cost
+ * was not nothing: a `min` on a date input is enforced by the BROWSER, so a
+ * December-2025 range could not be typed or picked at all. The server never got
+ * the chance to answer correctly, because the question was never sent.
+ *
+ * Each client's real floor now arrives on every period option as
+ * `inceptionIso` (see availablePeriods on the server), and the helpers below
+ * take it as a parameter. This constant remains only as the pre-load default.
  */
-export const INCEPTION_ISO = '2026-06-30';
+export const DEFAULT_INCEPTION_ISO = '2026-06-30';
 
 /** Today, as the ISO day string the date input speaks. */
 export function todayIso(): string {
@@ -37,13 +43,14 @@ export function todayIso(): string {
  * user types, so "0026-07-15" parses perfectly well as a Date and is exactly
  * what must NOT trigger a fetch.
  */
-export function isCompleteDay(value: string): boolean {
+export function isCompleteDay(value: string, inceptionIso = DEFAULT_INCEPTION_ISO): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return false;
   // A four-digit year that is still obviously partial — 0026, 0202 — is a
-  // keystroke, not a request. Nothing in this book predates 2026.
-  return value >= INCEPTION_ISO;
+  // keystroke, not a request. The floor is the CLIENT'S inception, so this
+  // still rejects the half-typed years without rejecting real early history.
+  return value >= inceptionIso;
 }
 
 /**
@@ -53,8 +60,12 @@ export function isCompleteDay(value: string): boolean {
  * range is rejected here rather than at the server so the user gets a quiet "not
  * yet" while typing instead of an error banner that replaces their figures.
  */
-export function isUsableRange(from: string, to: string): boolean {
-  return isCompleteDay(from) && isCompleteDay(to) && from < to;
+export function isUsableRange(
+  from: string,
+  to: string,
+  inceptionIso = DEFAULT_INCEPTION_ISO,
+): boolean {
+  return isCompleteDay(from, inceptionIso) && isCompleteDay(to, inceptionIso) && from < to;
 }
 
 /**
@@ -63,12 +74,16 @@ export function isUsableRange(from: string, to: string): boolean {
  * Returned as a hint beside the inputs rather than thrown: while someone is
  * typing a year the honest state is "keep going", not "error".
  */
-export function rangeHint(from: string, to: string): string | null {
+export function rangeHint(
+  from: string,
+  to: string,
+  inceptionIso = DEFAULT_INCEPTION_ISO,
+): string | null {
   if (!from) return 'Choose a start date to measure a custom range.';
-  if (!isCompleteDay(from)) {
-    return `Enter a full start date — the book has no priced history before ${INCEPTION_ISO}.`;
+  if (!isCompleteDay(from, inceptionIso)) {
+    return `Enter a full start date — this mandate has no history before ${inceptionIso}.`;
   }
-  if (!isCompleteDay(to)) return 'Enter a full end date.';
+  if (!isCompleteDay(to, inceptionIso)) return 'Enter a full end date.';
   if (from >= to) return 'The start date must fall before the end date.';
   return null;
 }

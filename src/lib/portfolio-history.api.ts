@@ -86,6 +86,12 @@ export interface PeriodOption {
   hint: string;
   /** The optgroup this option belongs under. */
   group: 'Current' | 'Quarters' | 'Years' | 'Custom';
+  /**
+   * The earliest date THIS client's windows may open on, `YYYY-MM-DD` — their
+   * own mandate start, not a house-wide constant. Identical on every option;
+   * see availablePeriods on the server for why it is carried per-row.
+   */
+  inceptionIso: string;
 }
 
 /**

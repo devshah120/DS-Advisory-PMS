@@ -11,7 +11,7 @@ import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
 import { useCurrency } from '@/components/layout/MarketContext';
 import { Badge, Card, CardHeader, Input, Select, Skeleton } from '@/components/ui';
 import {
-  INCEPTION_ISO,
+  DEFAULT_INCEPTION_ISO,
   isUsableRange,
   rangeHint,
   todayIso,
@@ -76,6 +76,13 @@ export function FamilyPerformance({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * The floor for the date picker: this client's own inception, as reported by
+   * the periods endpoint. Falls back to the house date only until the options
+   * have loaded — every option carries the same value, so the first one does.
+   */
+  const inceptionIso = options[0]?.inceptionIso ?? DEFAULT_INCEPTION_ISO;
+
   useEffect(() => {
     let cancelled = false;
     familyPerformanceApi
@@ -109,7 +116,7 @@ export function FamilyPerformance({
        * complete, in-range pair keeps the previously loaded window on screen
        * instead of replacing it with a warning about a date nobody chose.
        */
-      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo)) {
+      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo, inceptionIso)) {
         setPeriodReturn(null);
         setLoading(false);
         return;
@@ -159,7 +166,8 @@ export function FamilyPerformance({
   }, [options]);
 
   /** Why the range is not measurable yet, or null once it is. */
-  const customHint = period === 'CUSTOM' ? rangeHint(customFrom, customTo) : null;
+  const customHint =
+    period === 'CUSTOM' ? rangeHint(customFrom, customTo, inceptionIso) : null;
 
   const selector = (
     <div className="flex flex-wrap items-end gap-3">
@@ -188,7 +196,7 @@ export function FamilyPerformance({
             type="date"
             label="From"
             value={customFrom}
-            min={INCEPTION_ISO}
+            min={inceptionIso}
             max={customTo || todayIso()}
             onChange={(e) => setCustomFrom(e.target.value)}
           />
@@ -196,7 +204,7 @@ export function FamilyPerformance({
             type="date"
             label="To"
             value={customTo}
-            min={customFrom || INCEPTION_ISO}
+            min={customFrom || inceptionIso}
             max={todayIso()}
             onChange={(e) => setCustomTo(e.target.value)}
           />

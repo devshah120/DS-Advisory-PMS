@@ -12,7 +12,7 @@ import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
 import { useCurrency } from '@/components/layout/MarketContext';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 import {
-  INCEPTION_ISO,
+  DEFAULT_INCEPTION_ISO,
   isUsableRange,
   rangeHint,
   todayIso,
@@ -106,6 +106,13 @@ export function PeriodPerformance({
   const [seeding, setSeeding] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
+  /**
+   * The floor for the date picker: this client's own inception, as reported by
+   * the periods endpoint. Falls back to the house date only until the options
+   * have loaded — every option carries the same value, so the first one does.
+   */
+  const inceptionIso = options[0]?.inceptionIso ?? DEFAULT_INCEPTION_ISO;
+
   useEffect(() => {
     let cancelled = false;
     portfolioHistoryApi
@@ -142,7 +149,7 @@ export function PeriodPerformance({
        * the user is still mid-keystroke. Waiting for a complete, in-range pair
        * keeps the loaded window on screen until there is a real range to load.
        */
-      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo)) {
+      if (period === 'CUSTOM' && !isUsableRange(customFrom, customTo, inceptionIso)) {
         setPeriodReturn(null);
         setAsOf(null);
         setLoading(false);
@@ -230,7 +237,8 @@ export function PeriodPerformance({
   }, [options]);
 
   /** Why the range is not measurable yet, or null once it is. */
-  const customHint = period === 'CUSTOM' ? rangeHint(customFrom, customTo) : null;
+  const customHint =
+    period === 'CUSTOM' ? rangeHint(customFrom, customTo, inceptionIso) : null;
 
   const selector = (
     <div className="flex flex-wrap items-end gap-3">
@@ -259,7 +267,7 @@ export function PeriodPerformance({
             type="date"
             label="From"
             value={customFrom}
-            min={INCEPTION_ISO}
+            min={inceptionIso}
             max={customTo || todayIso()}
             onChange={(e) => setCustomFrom(e.target.value)}
           />
@@ -267,7 +275,7 @@ export function PeriodPerformance({
             type="date"
             label="To"
             value={customTo}
-            min={customFrom || INCEPTION_ISO}
+            min={customFrom || inceptionIso}
             max={todayIso()}
             onChange={(e) => setCustomTo(e.target.value)}
           />
