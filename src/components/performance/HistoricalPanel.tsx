@@ -330,9 +330,12 @@ export function HistoricalPanel({ clientId }: { clientId: string }) {
             {asOf.cashShortfall > 0 && (
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
                 Cash is shown as zero: replaying the ledger to this date left it{' '}
-                {formatCurrency(asOf.cashShortfall, currency)} below zero, which means some proceeds are
-                recorded without their matching purchase. Allocation weights are computed on the
-                floored balance, so they stay correct — but the ledger gap is worth closing.
+                {formatCurrency(asOf.cashShortfall, currency)} below zero. The replay starts from the
+                account&rsquo;s opening balance and applies every trade, so a shortfall means it never
+                saw the money these purchases were funded with — most often an opening balance or
+                deposits that were never recorded, or a trade entered twice. Position values and
+                allocation weights are unaffected; the cash line is what cannot be trusted until the
+                gap is closed.
               </p>
             )}
           </Card>
