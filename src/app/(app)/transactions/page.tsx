@@ -12,7 +12,6 @@ import { useMarket } from '@/components/layout/MarketContext';
 import { CashFlowModal } from '@/components/transactions/CashFlowModal';
 import { DividendModal } from '@/components/transactions/DividendModal';
 import { GroupedByDate } from '@/components/transactions/GroupedByDate';
-import { EditTransactionModal } from '@/components/transactions/EditTransactionModal';
 import {
   Card,
   Tabs,
@@ -63,11 +62,6 @@ export default function TransactionsPage() {
   const [pending, setPending] = useState<{ rows: TxRow[]; clear: () => void } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // The row the edit form is open on. Held as the row itself rather than an id
-  // so the form seeds from what is already on screen — reopening the same row
-  // after a save must show the saved values, which `editing` carries once the
-  // list below is patched.
-  const [editing, setEditing] = useState<TxRow | null>(null);
 
   useEffect(() => {
     if (!marketReady) return;
@@ -218,21 +212,6 @@ export default function TransactionsPage() {
     }
   };
 
-  /**
-   * Splice a corrected row back into the list.
-   *
-   * The server's copy replaces the local one wholesale — it normalises the
-   * ticker's casing and the date, so merging the form's own values would show
-   * something subtly different from what was stored. The client is re-resolved
-   * because the row may have been retyped (a buy corrected to a deposit), and
-   * `client` is what drives the flow tab's method label.
-   */
-  const handleSaved = (tx: Transaction) => {
-    const row: TxRow = { ...tx, client: clients.find((c) => c.id === tx.clientId) };
-    setTxns((prev) => prev.map((t) => (t.id === tx.id ? row : t)));
-    setEditing(null);
-  };
-
   /** Rows in the staged selection that feed a client's XIRR, per their method. */
   const pendingFlowCount = pending ? pending.rows.filter(isFlowRow).length : 0;
 
@@ -265,7 +244,7 @@ export default function TransactionsPage() {
           // The row itself may become clickable later; an action button inside
           // a row should never also trigger the row.
           e.stopPropagation();
-          setEditing(r);
+          router.push(`/transactions/edit?id=${r.id}`);
         }}
       >
         Edit
@@ -548,7 +527,7 @@ export default function TransactionsPage() {
                     variant="outline"
                     size="sm"
                     leftIcon={<Pencil className="h-3.5 w-3.5" />}
-                    onClick={() => setEditing(rows[0])}
+                    onClick={() => router.push(`/transactions/edit?id=${rows[0].id}`)}
                   >
                     Edit
                   </Button>
@@ -673,14 +652,6 @@ export default function TransactionsPage() {
           </div>
         )}
       </Modal>
-
-      <EditTransactionModal
-        transaction={editing}
-        client={editing?.client}
-        currency={currency}
-        onClose={() => setEditing(null)}
-        onSaved={handleSaved}
-      />
 
       <CashFlowModal
         isOpen={flowModalOpen}

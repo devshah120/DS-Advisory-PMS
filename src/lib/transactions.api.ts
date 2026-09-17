@@ -60,6 +60,21 @@ export const transactionsApi = {
   },
 
   /**
+   * One row by id, for the edit page.
+   *
+   * The page cannot rely on the list it was opened from: a refresh or a pasted
+   * link arrives with nothing in memory. The backend answers null rather than
+   * 404 for a row in another manager's book, so the caller treats a null as
+   * "not found" without distinguishing the two.
+   */
+  async get(id: string) {
+    const res = await apiClient
+      .getClient()
+      .get<Transaction | null>(`/transactions/${id}`);
+    return res.data;
+  },
+
+  /**
    * Correct an existing row. PATCH, so only the changed fields travel — the
    * backend leaves every key the payload omits alone.
    *
