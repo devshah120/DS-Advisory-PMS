@@ -254,6 +254,27 @@ export interface Transaction {
 }
 
 /**
+ * A correction to an existing ledger row.
+ *
+ * `clientId` is absent on purpose: moving a transaction to another client moves
+ * a flow out of one XIRR and into another in a single save, with neither figure
+ * visible on the form. That is a delete plus a re-entry, not an edit.
+ *
+ * Every field is optional — the form sends only what changed. `null` on a
+ * nullable field clears it; omitting the key leaves it untouched.
+ */
+export interface UpdateTransactionInput {
+  ticker?: string | null;
+  type?: TransactionType;
+  quantity?: number | null;
+  price?: number | null;
+  amount?: number;
+  date?: string;
+  description?: string | null;
+  reference?: string | null;
+}
+
+/**
  * An external cash flow recorded for a cash-flow-basis client. It is persisted as
  * an ordinary Transaction (cash_deposit / cash_withdrawal) — the direction here is
  * just the shape of the form, so the operator cannot accidentally file a trade.

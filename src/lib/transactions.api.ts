@@ -1,5 +1,10 @@
 import { apiClient } from './api';
-import { CreateCashFlowInput, CreateDividendInput, Transaction } from '@/types';
+import {
+  CreateCashFlowInput,
+  CreateDividendInput,
+  Transaction,
+  UpdateTransactionInput,
+} from '@/types';
 
 export const transactionsApi = {
   async list() {
@@ -51,6 +56,21 @@ export const transactionsApi = {
     const res = await apiClient
       .getClient()
       .post<Transaction>('/transactions/dividend', input);
+    return res.data;
+  },
+
+  /**
+   * Correct an existing row. PATCH, so only the changed fields travel — the
+   * backend leaves every key the payload omits alone.
+   *
+   * Returns the whole corrected transaction (the backend re-reads it), which is
+   * what the caller should splice into its list rather than its own optimistic
+   * merge: the server normalises the ticker's casing and the date.
+   */
+  async update(id: string, input: UpdateTransactionInput) {
+    const res = await apiClient
+      .getClient()
+      .patch<Transaction>(`/transactions/${id}`, input);
     return res.data;
   },
 
