@@ -1,4 +1,19 @@
 import { apiClient } from './api';
+import { Holding } from '@/types';
+
+/**
+ * A correction to one dated fill behind a position.
+ *
+ * `amount` is what the fill actually cost or realised; the per-share price is
+ * derived from it server-side, so the two can never disagree on the blotter.
+ * Every field is optional — only what the user changed needs to travel.
+ */
+export interface LotInput {
+  date?: string;
+  side?: 'BUY' | 'SELL';
+  quantity?: number;
+  amount?: number;
+}
 
 export interface BulkImportRowResult {
   row: number;
@@ -47,6 +62,42 @@ export const holdingsApi = {
       // JSON Content-Type from the axios instance.
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
+    return res.data;
+  },
+
+  /**
+   * Correct one dated fill behind a position, and get the rebuilt position back.
+   *
+   * The write lands on the transaction, not the holding: quantity and average
+   * cost here are a summary of the ledger, and the backend recomputes them from
+   * it once the correction is in. That is why this returns the whole holding —
+   * the caller splices the server's numbers into its table rather than guessing
+   * what the correction did to the weighted average.
+   */
+  async updateLot(holdingId: string, lotId: string, input: LotInput): Promise<Holding> {
+    const res = await apiClient
+      .getClient()
+      .patch<Holding>(`/holdings/${holdingId}/lots/${lotId}`, input);
+    return res.data;
+  },
+
+  /** Book a fill that was never recorded. Returns the rebuilt position. */
+  async addLot(holdingId: string, input: LotInput): Promise<Holding> {
+    const res = await apiClient
+      .getClient()
+      .post<Holding>(`/holdings/${holdingId}/lots`, input);
+    return res.data;
+  },
+
+  /**
+   * Remove a fill that should not be on the ledger. Returns the rebuilt
+   * position, which can come back at zero quantity if it was the last lot —
+   * a closed position, not a deleted one.
+   */
+  async removeLot(holdingId: string, lotId: string): Promise<Holding> {
+    const res = await apiClient
+      .getClient()
+      .delete<Holding>(`/holdings/${holdingId}/lots/${lotId}`);
     return res.data;
   },
 

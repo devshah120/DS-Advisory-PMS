@@ -9,6 +9,7 @@ import {
   Wallet,
   PiggyBank,
   Trash2,
+  Pencil,
   Tag,
   Users,
   ChevronRight,
@@ -27,6 +28,7 @@ import { transactionsApi } from '@/lib/transactions.api';
 import { familiesApi } from '@/lib/families.api';
 import { classificationApi } from '@/lib/classification.api';
 import { SectorAssignCell } from '@/components/holdings/SectorAssignCell';
+import { EditPositionModal } from '@/components/holdings/EditPositionModal';
 import {
   downloadClientHoldingsWorkbook,
   downloadFamilyHoldingsWorkbook,
@@ -354,6 +356,7 @@ export default function HoldingsPage() {
   // Holds the row awaiting confirmation; deleting is irreversible, so it is
   // never done straight off the click.
   const [pendingDelete, setPendingDelete] = useState<ClientPositionRow | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<ClientPositionRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   // --- historical holdings ---
@@ -1596,22 +1599,38 @@ export default function HoldingsPage() {
       accessor: () => '',
       sortable: false,
       align: 'center',
-      width: '56px',
+      width: '88px',
       render: (r) => (
-        <button
-          type="button"
-          aria-label={`Delete ${r.symbol}`}
-          title={`Delete ${r.symbol}`}
-          onClick={(e) => {
-            // The row opens the cost breakdown, so without this a click on
-            // Delete would also open the drawer behind the confirmation.
-            e.stopPropagation();
-            setPendingDelete(r);
-          }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-ink-tertiary transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <div className="flex items-center justify-center gap-1">
+          <button
+            type="button"
+            aria-label={`Edit ${r.symbol}`}
+            title={`Edit ${r.symbol}`}
+            onClick={(e) => {
+              // Same reason as Delete below: the row itself opens the cost
+              // breakdown, and the drawer must not slide in behind the editor.
+              e.stopPropagation();
+              setPendingEdit(r);
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-ink-tertiary transition-colors hover:bg-brand-soft hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Delete ${r.symbol}`}
+            title={`Delete ${r.symbol}`}
+            onClick={(e) => {
+              // The row opens the cost breakdown, so without this a click on
+              // Delete would also open the drawer behind the confirmation.
+              e.stopPropagation();
+              setPendingDelete(r);
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-ink-tertiary transition-colors hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       ),
     },
   ];
@@ -2477,6 +2496,16 @@ export default function HoldingsPage() {
           </div>
         )}
       </Drawer>
+
+      {/* Correct the fills behind a position. Edits the ledger rather than the
+          holding row, because quantity and average cost here are a summary of
+          it — see the note in EditPositionModal. */}
+      <EditPositionModal
+        position={pendingEdit}
+        currency={currency}
+        onClose={() => setPendingEdit(null)}
+        onSaved={loadHoldings}
+      />
 
       {/* Delete confirmation */}
       <Modal
