@@ -32,6 +32,7 @@ import { EditPositionModal } from '@/components/holdings/EditPositionModal';
 import {
   downloadClientHoldingsWorkbook,
   downloadFamilyHoldingsWorkbook,
+  formatStatementDate,
   type HoldingsExportRow,
 } from '@/lib/holdingsExport';
 import {
@@ -42,7 +43,15 @@ import {
   formatSignedPct,
   cn,
 } from '@/lib/utils';
-import { Holding, Client, Family, FamilyAggregate, FamilyPosition, Transaction } from '@/types';
+import {
+  Holding,
+  Client,
+  Family,
+  FamilyAggregate,
+  FamilyPosition,
+  HoldingsAsOf,
+  Transaction,
+} from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { useSession } from '@/components/layout/SessionContext';
@@ -274,6 +283,54 @@ function openPositions<T extends { quantity: number }>(rows: T[]): T[] {
   return rows.filter((h) => Math.abs(Number(h.quantity) || 0) > CLOSED_POSITION_EPSILON);
 }
 
+/**
+ * Today as YYYY-MM-DD in the user's own zone — the latest date an as-of picker
+ * offers. `toISOString()` is UTC, which until 05:30 IST is still yesterday and
+ * would refuse today's date to the desk that most needs it.
+ */
+function localToday(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * A server as-of statement as workbook rows, in the server's order (largest
+ * first). Every figure is taken as given — quantities, the day's closes and the
+ * cash-inclusive weight are all the server's — so nothing on this page can mix
+ * today's totals into a historical statement.
+ */
+function asOfExportRows(statement: HoldingsAsOf, withAccounts: boolean): HoldingsExportRow[] {
+  return statement.positions.map((p, i) => ({
+    srNo: i + 1,
+    symbol: p.displayTicker,
+    name: p.company,
+    sector: p.sector || 'Uncategorized',
+    quantity: p.quantity,
+    averageCostBasis: p.averageCost,
+    costBasisTotal: p.costBasis,
+    lastPrice: p.closingPrice,
+    currentValue: p.marketValue,
+    pl: p.unrealizedPnL,
+    plPercent: p.unrealizedPnLPercent,
+    allocPercent: p.weight,
+    ...(withAccounts ? { accounts: p.accounts } : {}),
+  }));
+}
+
+/**
+ * One disclosure line for each position the server could not value at a
+ * verified close for the date. These go to the client in the sheet itself: a
+ * price that is not that day's close must not be presented as one.
+ */
+function priceExceptionNotes(statement: HoldingsAsOf): string[] {
+  return statement.priceExceptions.map((e) =>
+    e.priceStatus === 'stale' && e.priceDate
+      ? `${e.displayTicker}: no close available for this date; valued at its last available close (${formatStatementDate(e.priceDate)}).`
+      : `${e.displayTicker}: no market price available for this date; valued at cost.`
+  );
+}
+
 export default function HoldingsPage() {
   const { toast } = useToast();
   // The selected book. `currency` drives every money column on this page, so an
@@ -362,6 +419,8 @@ export default function HoldingsPage() {
   // --- historical holdings ---
   const [historicalDate, setHistoricalDate] = useState<string>('');
   const [loadingHistorical, setLoadingHistorical] = useState(false);
+  const [familyHistoricalDate, setFamilyHistoricalDate] = useState<string>('');
+  const [loadingFamilyHistorical, setLoadingFamilyHistorical] = useState(false);
 
   async function loadHoldings() {
     try {
@@ -543,59 +602,55 @@ export default function HoldingsPage() {
     }
   }
 
+  /**
+   * Writes an as-of statement to the firm's workbook and reports the outcome.
+   *
+   * Cash is the statement's own replayed balance for that date — never the
+   * client's balance today — and any position the server could not value at a
+   * verified close is both disclosed in the sheet and raised here, so whoever
+   * sends the file knows to look before it reaches the client.
+   */
+  async function deliverAsOfStatement(
+    statement: HoldingsAsOf,
+    name: string,
+    variant: 'client' | 'family'
+  ) {
+    const rows = asOfExportRows(statement, variant === 'family');
+    const options = { asOf: statement.asOfDate, notes: priceExceptionNotes(statement) };
+
+    if (variant === 'family') {
+      await downloadFamilyHoldingsWorkbook(name, rows, statement.totals.cash, options);
+    } else {
+      await downloadClientHoldingsWorkbook(name, rows, statement.totals.cash, options);
+    }
+
+    const flagged = statement.priceExceptions;
+    if (flagged.length > 0) {
+      toast({
+        tone: 'warning',
+        title: `Exported — ${flagged.length} price${flagged.length === 1 ? '' : 's'} not verified`,
+        description:
+          `${flagged.map((e) => e.displayTicker).join(', ')} could not be priced at the ` +
+          `${formatStatementDate(statement.asOfDate)} close. Each is noted at the foot of the sheet — review before sending.`,
+      });
+    } else {
+      toast({
+        tone: 'success',
+        title: 'Historical holdings exported',
+        description: `${rows.length} position${rows.length === 1 ? '' : 's'} at the ${formatStatementDate(
+          statement.asOfDate
+        )} close`,
+      });
+    }
+  }
+
   async function handleExportHistoricalHoldings() {
     if (!activeClient || !historicalDate) return;
 
     setLoadingHistorical(true);
     try {
-      const asOfDate = new Date(historicalDate);
-      const historicalHoldings = await holdingsApi.getPortfolioAsOfDate(activeClient.clientId, asOfDate);
-
-      const rows: ClientPositionRow[] = openPositions<any>(historicalHoldings)
-        .sort((a: any, b: any) => b.marketValue - a.marketValue)
-        .map((h: any, i: number) => {
-          const costBasisTotal = h.averageCost * h.quantity;
-          const currentValue = h.quantity * h.currentPrice;
-          const pl = currentValue - costBasisTotal;
-          const total = clientTotals.currentValue + activeClient.cashBalance;
-
-          return {
-            id: h.id,
-            srNo: i + 1,
-            symbol: h.ticker,
-            name: h.company,
-            clientId: h.clientId,
-            ownerName: activeClient.clientName,
-            sector: h.sector || 'Uncategorized',
-            quantity: h.quantity,
-            averageCostBasis: h.averageCost,
-            costBasisTotal,
-            lastPrice: h.currentPrice,
-            currentValue,
-            pl,
-            plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
-            allocPercent: total ? (currentValue / total) * 100 : 0,
-          };
-        });
-
-      const formattedDate = historicalDate.replace(/-/g, '_');
-      const filename = `${activeClient.clientName.replace(/\s+/g, '_').toLowerCase()}-holdings-as-of-${formattedDate}`;
-
-      const totalHistorical = rows.reduce(
-        (acc, r) => ({
-          costBasisTotal: acc.costBasisTotal + r.costBasisTotal,
-          currentValue: acc.currentValue + r.currentValue,
-          pl: acc.pl + r.pl,
-        }),
-        { costBasisTotal: 0, currentValue: 0, pl: 0 }
-      );
-
-      await downloadClientHoldingsWorkbook(filename, rows, activeClient.cashBalance);
-      toast({
-        tone: 'success',
-        title: 'Historical holdings exported',
-        description: `Portfolio as of ${historicalDate} downloaded`,
-      });
+      const statement = await holdingsApi.getPortfolioAsOfDate(activeClient.clientId, historicalDate);
+      await deliverAsOfStatement(statement, activeClient.clientName, 'client');
       setHistoricalDate('');
     } catch (err: any) {
       const message =
@@ -608,14 +663,39 @@ export default function HoldingsPage() {
   }
 
   /**
+   * The household's merged holdings as of a past date. Every member is
+   * replayed and priced server-side, then merged with the same blended-cost
+   * rule as the live family view.
+   */
+  async function handleExportFamilyHistorical() {
+    if (!activeFamily || !familyHistoricalDate) return;
+
+    setLoadingFamilyHistorical(true);
+    try {
+      const statement = await familiesApi.holdingsAsOf(activeFamily.familyId, familyHistoricalDate);
+      await deliverAsOfStatement(statement, activeFamily.familyName, 'family');
+      setFamilyHistoricalDate('');
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message ??
+        (typeof err?.message === 'string' ? err.message : 'Export failed');
+      toast({ tone: 'error', title: 'Could not export historical family holdings', description: String(message) });
+    } finally {
+      setLoadingFamilyHistorical(false);
+    }
+  }
+
+  /**
    * The household's merged book as the firm's formatted workbook — the same
    * sheet an individual client's export produces, so a family review and a
    * single-mandate review hand the client the same-looking document.
    *
    * Rows arrive already sorted and filtered by the table, so whatever the user
    * is looking at is what gets exported. Weight comes from the server's
-   * aggregate rather than being recomputed here: it is the share of the whole
-   * household portfolio (cash included), and re-deriving it from a filtered
+   * aggregate rather than being recomputed here, and it must be
+   * `portfolioWeight` — the share of the whole household portfolio, cash
+   * included. `weight` excludes cash, so beside the sheet's cash line it made
+   * the statement add up to more than 100%. Re-deriving either from a filtered
    * subset would silently rebase every percentage.
    */
   async function handleExportFamily(rows: FamilyPosition[]) {
@@ -633,7 +713,7 @@ export default function HoldingsPage() {
       currentValue: p.marketValue,
       pl: p.unrealizedPnL,
       plPercent: p.unrealizedPnLPercent,
-      allocPercent: p.weight,
+      allocPercent: p.portfolioWeight,
       accounts: p.accounts,
     }));
 
@@ -2251,6 +2331,35 @@ export default function HoldingsPage() {
                   </Card>
                 )}
 
+                {/* The household as it stood on a past date */}
+                <div>
+                  <label
+                    htmlFor="family-historical-date"
+                    className="block text-sm font-medium text-ink-secondary mb-2"
+                  >
+                    Export family holdings as of date
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="family-historical-date"
+                      type="date"
+                      value={familyHistoricalDate}
+                      onChange={(e) => setFamilyHistoricalDate(e.target.value)}
+                      max={localToday()}
+                      className="flex-1 px-3 py-2 rounded-[8px] border border-border bg-surface-2 text-sm text-ink placeholder-ink-tertiary focus:outline-none focus:ring-2 focus:ring-brand"
+                    />
+                    <Button
+                      variant="secondary"
+                      leftIcon={<Download className="h-4 w-4" />}
+                      onClick={handleExportFamilyHistorical}
+                      disabled={!familyHistoricalDate || loadingFamilyHistorical}
+                      loading={loadingFamilyHistorical}
+                    >
+                      Export Historical
+                    </Button>
+                  </div>
+                </div>
+
                 {/* Merged positions */}
                 <DataTable
                   columns={familyPositionColumns}
@@ -2333,7 +2442,7 @@ export default function HoldingsPage() {
                     type="date"
                     value={historicalDate}
                     onChange={(e) => setHistoricalDate(e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={localToday()}
                     className="flex-1 px-3 py-2 rounded-[8px] border border-border bg-surface-2 text-sm text-ink placeholder-ink-tertiary focus:outline-none focus:ring-2 focus:ring-brand"
                   />
                   <Button

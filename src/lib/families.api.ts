@@ -1,5 +1,5 @@
 import { apiClient } from './api';
-import type { Family, FamilyAggregate } from '@/types';
+import type { Family, FamilyAggregate, HoldingsAsOf } from '@/types';
 import type { Market } from './market-scope';
 
 export interface CreateFamilyInput {
@@ -38,6 +38,18 @@ export const familiesApi = {
    */
   async aggregate(id: string): Promise<FamilyAggregate> {
     const res = await apiClient.getClient().get<FamilyAggregate>(`/families/${id}/aggregate`);
+    return res.data;
+  },
+
+  /**
+   * The merged household holdings as they stood at the close of `date`
+   * (YYYY-MM-DD): every member replayed to that day, merged by symbol, and
+   * priced at that day's close.
+   */
+  async holdingsAsOf(id: string, date: string): Promise<HoldingsAsOf> {
+    const res = await apiClient
+      .getClient()
+      .get<HoldingsAsOf>(`/families/${id}/holdings-as-of/${date}`);
     return res.data;
   },
 

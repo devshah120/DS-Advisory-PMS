@@ -155,7 +155,13 @@ export interface FamilyPosition {
   marketValue: number;
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
+  /** Share of the household's invested value (cash excluded), 0–100. */
   weight: number;
+  /**
+   * Share of the household's portfolio value INCLUDING cash, 0–100 — the
+   * weight a client statement prints beside its cash line.
+   */
+  portfolioWeight: number;
   realizedPnL: number;
   /** How many of the family's accounts hold it. */
   accounts: number;
@@ -166,6 +172,55 @@ export interface FamilyPosition {
     averageCost: number;
     marketValue: number;
     unrealizedPnL: number;
+  }>;
+}
+
+/**
+ * A holdings statement as it stood at the close of a past date, for one client
+ * or a whole household — the server replays the ledger (corporate actions
+ * included) and prices every position at that day's close.
+ */
+export interface HoldingsAsOfPosition {
+  ticker: string;
+  displayTicker: string;
+  company: string;
+  sector: string;
+  industry: string;
+  quantity: number;
+  averageCost: number;
+  costBasis: number;
+  closingPrice: number;
+  /** The session `closingPrice` is the close of; null when there is no price history. */
+  priceDate: string | null;
+  priceStatus: 'live' | 'close' | 'stale' | 'missing';
+  marketValue: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  /** Share of the portfolio value INCLUDING cash, 0–100. */
+  weight: number;
+  accounts: number;
+}
+
+export interface HoldingsAsOf {
+  /** YYYY-MM-DD. */
+  asOfDate: string;
+  currency: string;
+  positions: HoldingsAsOfPosition[];
+  totals: {
+    costBasis: number;
+    marketValue: number;
+    unrealizedPnL: number;
+    unrealizedPnLPercent: number;
+    cash: number;
+    cashShortfall: number;
+    portfolioValue: number;
+  };
+  /** Positions not valued at a verified close for the date — each must be disclosed. */
+  priceExceptions: Array<{
+    ticker: string;
+    displayTicker: string;
+    priceDate: string | null;
+    priceStatus: 'stale' | 'missing';
   }>;
 }
 

@@ -189,17 +189,45 @@ const ACCOUNTS_COLUMN: ColumnSpec = {
 const NAME_COLUMN_INDEX = 3; // 1-based position of 'Name'
 
 /**
+ * What turns the sheet into a statement AS OF a past date. Absent for the
+ * live export, which keeps the reference layout untouched.
+ */
+export interface StatementOptions {
+  /** YYYY-MM-DD the positions and prices are as of. */
+  asOf?: string;
+  /**
+   * Lines printed under the TOTAL — chiefly the positions whose price is not a
+   * verified close for the date. A client statement discloses those rather
+   * than printing them as though they were market prices.
+   */
+  notes?: string[];
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * '2026-06-30' → '30 Jun 2026'. Built by hand rather than through
+ * toLocaleDateString, which renders the date in the viewer's zone and locale —
+ * a statement dated 30 June must not read 29 June on a machine west of UTC.
+ */
+export function formatStatementDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+}
+
+/**
  * The sheet's columns for a given variant. The individual-client layout is the
  * firm's reference sheet and stays exactly as it was; the family layout is that
  * same sheet with one column added, so both read as the same document.
  */
-function columnsFor(variant: 'client' | 'family'): ColumnSpec[] {
-  if (variant === 'client') return BASE_COLUMNS;
-  return [
-    ...BASE_COLUMNS.slice(0, NAME_COLUMN_INDEX),
-    ACCOUNTS_COLUMN,
-    ...BASE_COLUMNS.slice(NAME_COLUMN_INDEX),
-  ];
+function columnsFor(variant: 'client' | 'family', asOf?: string): ColumnSpec[] {
+  // On a dated statement the price column is that day's close, not the
+  // latest quote, and the header says so.
+  const base = asOf
+    ? BASE_COLUMNS.map((c) => (c.header === 'Last Price' ? { ...c, header: 'Closing Price', width: 14 } : c))
+    : BASE_COLUMNS;
+  if (variant === 'client') return base;
+  return [...base.slice(0, NAME_COLUMN_INDEX), ACCOUNTS_COLUMN, ...base.slice(NAME_COLUMN_INDEX)];
 }
 
 /**
@@ -217,9 +245,10 @@ export function buildClientHoldingsWorkbook(
   clientName: string,
   rows: HoldingsExportRow[],
   cashBalance = 0,
-  variant: 'client' | 'family' = 'client'
+  variant: 'client' | 'family' = 'client',
+  options: StatementOptions = {}
 ): ExcelJS.Workbook {
-  const columns = columnsFor(variant);
+  const columns = columnsFor(variant, options.asOf);
   const allocColumn = columns.length; // 1-based index of %alloc
   const plPercentColumn = columns.length - 1;
 
@@ -227,7 +256,9 @@ export function buildClientHoldingsWorkbook(
   wb.creator = 'Giriraj Global Consultants';
   wb.created = new Date();
 
-  const sheet = wb.addWorksheet(variant === 'family' ? 'Family Holdings' : 'Holdings', {
+  const sheetName = variant === 'family' ? 'Family Holdings' : 'Holdings';
+  // Sheet names cap at 31 characters; 'Family Holdings 30 Sep 2026' is 27.
+  const sheet = wb.addWorksheet(options.asOf ? `${sheetName} ${formatStatementDate(options.asOf)}` : sheetName, {
     views: [{ showGridLines: false }],
   });
   sheet.columns = columns.map((c) => ({ width: c.width }));
@@ -262,6 +293,10 @@ export function buildClientHoldingsWorkbook(
   applyAllocationGradient(sheet, rows.length, allocColumn);
   if (cashBalance > 0) addCashRow(sheet, rows, cashBalance, columns, allocColumn);
   addTotalRow(sheet, rows, cashBalance, columns);
+  addStatementNotes(sheet, [
+    ...(options.asOf ? [`Positions and closing prices as of ${formatStatementDate(options.asOf)}.`] : []),
+    ...(options.notes ?? []),
+  ]);
   addSectorAllocationBlock(wb, sheet, buildSectorSlices(rows, cashBalance));
 
   return wb;
@@ -402,6 +437,21 @@ function addTotalRow(
     cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
     if (spec.numFmt && cell.value !== null) cell.numFmt = spec.numFmt;
   });
+}
+
+/**
+ * Plain italic lines under the TOTAL: the statement date, then any disclosure.
+ * Written in the Name column, which is wide enough to read and sits beside the
+ * figures they qualify.
+ */
+function addStatementNotes(sheet: ExcelJS.Worksheet, notes: string[]): void {
+  for (const note of notes) {
+    const leading: null[] = Array(NAME_COLUMN_INDEX - 1).fill(null);
+    const row = sheet.addRow([...leading, note]);
+    const cell = row.getCell(NAME_COLUMN_INDEX);
+    cell.font = { name: FONT_NAME, size: BODY_SIZE, italic: true };
+    cell.alignment = { horizontal: 'left', vertical: 'middle' };
+  }
 }
 
 /**
@@ -572,10 +622,11 @@ function addSectorAllocationBlock(
 export async function downloadClientHoldingsWorkbook(
   clientName: string,
   rows: HoldingsExportRow[],
-  cashBalance = 0
+  cashBalance = 0,
+  options: StatementOptions = {}
 ): Promise<void> {
-  const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance);
-  await saveWorkbook(wb, `${slugify(clientName)}-holdings.xlsx`);
+  const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance, 'client', options);
+  await saveWorkbook(wb, `${slugify(clientName)}-holdings${asOfSuffix(options)}.xlsx`);
 }
 
 /**
@@ -591,10 +642,15 @@ export async function downloadClientHoldingsWorkbook(
 export async function downloadFamilyHoldingsWorkbook(
   familyName: string,
   rows: HoldingsExportRow[],
-  cashBalance = 0
+  cashBalance = 0,
+  options: StatementOptions = {}
 ): Promise<void> {
-  const wb = buildClientHoldingsWorkbook(familyName, rows, cashBalance, 'family');
-  await saveWorkbook(wb, `${slugify(familyName)}-family-holdings.xlsx`);
+  const wb = buildClientHoldingsWorkbook(familyName, rows, cashBalance, 'family', options);
+  await saveWorkbook(wb, `${slugify(familyName)}-family-holdings${asOfSuffix(options)}.xlsx`);
+}
+
+function asOfSuffix(options: StatementOptions): string {
+  return options.asOf ? `-as-of-${options.asOf}` : '';
 }
 
 function slugify(name: string): string {

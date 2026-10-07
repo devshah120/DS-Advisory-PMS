@@ -1,5 +1,5 @@
 import { apiClient } from './api';
-import { Holding } from '@/types';
+import type { Holding, HoldingsAsOf } from '@/types';
 
 /**
  * A correction to one dated fill behind a position.
@@ -111,14 +111,14 @@ export const holdingsApi = {
   },
 
   /**
-   * Fetches the portfolio as it existed on a specific date by replaying
-   * all buy/sell transactions up to that date.
+   * The client's holdings statement as it stood at the close of `date`
+   * (YYYY-MM-DD, exactly as the date input produced it — never round-tripped
+   * through a Date, which shifts the day in any zone west of UTC).
    */
-  async getPortfolioAsOfDate(clientId: string, asOfDate: Date) {
-    const dateStr = asOfDate.toISOString().split('T')[0];
+  async getPortfolioAsOfDate(clientId: string, date: string): Promise<HoldingsAsOf> {
     const res = await apiClient
       .getClient()
-      .get(`/holdings/client/${clientId}/as-of-date/${dateStr}`);
+      .get<HoldingsAsOf>(`/holdings/client/${clientId}/as-of-date/${date}`);
     return res.data;
   },
 };
