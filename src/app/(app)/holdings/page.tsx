@@ -972,7 +972,7 @@ export default function HoldingsPage() {
   /**
    * A client-portal login's export: their own book in the same workbook the
    * desk sends from the client drawer — borders, Perpetua, %PL tints, the
-   * allocation gradient, the cash line and the sector allocation pie — rather
+   * allocation gradient, the cash line and the sector allocation table — rather
    * than a bare CSV of whichever summary table they happen to be looking at.
    *
    * A viewer is bound to one client, so `holdings` is already exactly that

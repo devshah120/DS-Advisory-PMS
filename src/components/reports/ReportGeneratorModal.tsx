@@ -794,7 +794,7 @@ export function ReportGeneratorModal({
                 {analysis.positions.length > 8 && (
                   <p className="border-t border-border bg-surface-2 px-3 py-2 text-[12px] text-ink-tertiary">
                     Showing the largest 8 of {analysis.positions.length} positions. The workbook
-                    contains every position, plus the sector allocation block and its chart.
+                    contains every position, plus the sector allocation table.
                   </p>
                 )}
               </div>
