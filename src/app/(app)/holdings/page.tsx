@@ -319,6 +319,53 @@ function asOfExportRows(statement: HoldingsAsOf, withAccounts: boolean): Holding
 }
 
 /**
+ * One client's positions as drill-down rows, largest first, in the firm's
+ * portfolio-sheet shape. Shared by the desk's client drawer and the client
+ * portal's own export so both deliver the same workbook from the same figures.
+ *
+ * Weights are a share of the whole portfolio, so idle cash sits in the
+ * denominator alongside the positions. A client holding cash is genuinely less
+ * exposed to each name than the position values alone would suggest, and the
+ * stock weights have to add up to less than 100% to say so.
+ */
+function clientPositionRowsFor(
+  owned: HoldingRow[],
+  ownerName: string,
+  cashBalance: number
+): ClientPositionRow[] {
+  const total = owned.reduce((s, h) => s + h.quantity * h.currentPrice, 0) + cashBalance;
+  return owned
+    .slice()
+    .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
+    .map((h, i) => {
+      // Derived from the position itself rather than read off the stored
+      // columns, so a row written before P&L was computed still reads true.
+      const costBasisTotal = h.averageCost * h.quantity;
+      const currentValue = h.quantity * h.currentPrice;
+      const pl = currentValue - costBasisTotal;
+      return {
+        id: h.id,
+        srNo: i + 1,
+        symbol: h.ticker,
+        name: h.company,
+        clientId: h.clientId,
+        ownerName,
+        // Same fallback as the sector rollup, so an unlabelled holding lands
+        // in one bucket everywhere instead of a blank slice of its own.
+        sector: h.sector || 'Uncategorized',
+        quantity: h.quantity,
+        averageCostBasis: h.averageCost,
+        costBasisTotal,
+        lastPrice: h.currentPrice,
+        currentValue,
+        pl,
+        plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
+        allocPercent: total ? (currentValue / total) * 100 : 0,
+      };
+    });
+}
+
+/**
  * One disclosure line for each position the server could not value at a
  * verified close for the date. These go to the client in the sheet itself: a
  * price that is not that day's close must not be presented as one.
@@ -915,43 +962,42 @@ export default function HoldingsPage() {
   /** Positions belonging to the client opened in the drill-down drawer. */
   const clientPositions: ClientPositionRow[] = useMemo(() => {
     if (!activeClient) return [];
-    const owned = holdings.filter((h) => h.clientId === activeClient.clientId);
-    // Weights are a share of the whole portfolio, so idle cash sits in the
-    // denominator alongside the positions. A client holding cash is genuinely
-    // less exposed to each name than the position values alone would suggest,
-    // and the stock weights have to add up to less than 100% to say so.
-    const total =
-      owned.reduce((s, h) => s + h.quantity * h.currentPrice, 0) + activeClient.cashBalance;
-    return owned
-      .slice()
-      .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
-      .map((h, i) => {
-        // Derived from the position itself rather than read off the stored
-        // columns, so a row written before P&L was computed still reads true.
-        const costBasisTotal = h.averageCost * h.quantity;
-        const currentValue = h.quantity * h.currentPrice;
-        const pl = currentValue - costBasisTotal;
-        return {
-          id: h.id,
-          srNo: i + 1,
-          symbol: h.ticker,
-          name: h.company,
-          clientId: h.clientId,
-          ownerName: activeClient.clientName,
-          // Same fallback as the sector rollup, so an unlabelled holding lands
-          // in one bucket everywhere instead of a blank slice of its own.
-          sector: h.sector || 'Uncategorized',
-          quantity: h.quantity,
-          averageCostBasis: h.averageCost,
-          costBasisTotal,
-          lastPrice: h.currentPrice,
-          currentValue,
-          pl,
-          plPercent: costBasisTotal ? (pl / costBasisTotal) * 100 : 0,
-          allocPercent: total ? (currentValue / total) * 100 : 0,
-        };
-      });
+    return clientPositionRowsFor(
+      holdings.filter((h) => h.clientId === activeClient.clientId),
+      activeClient.clientName,
+      activeClient.cashBalance
+    );
   }, [holdings, activeClient]);
+
+  /**
+   * A client-portal login's export: their own book in the same workbook the
+   * desk sends from the client drawer — borders, Perpetua, %PL tints, the
+   * allocation gradient, the cash line and the sector allocation pie — rather
+   * than a bare CSV of whichever summary table they happen to be looking at.
+   *
+   * A viewer is bound to one client, so `holdings` is already exactly that
+   * book. `keep` narrows it to the positions behind the rows being exported,
+   * so a search or selection in the table still carries into the file the way
+   * it does in the drawer; weights stay against the whole portfolio.
+   */
+  async function exportOwnHoldingsWorkbook(keep: (h: HoldingRow) => boolean) {
+    const own = clientRows[0];
+    if (!own) {
+      toast({ tone: 'warning', title: 'Nothing to export', description: 'There are no open positions.' });
+      return;
+    }
+    const book = holdings.filter((h) => h.clientId === own.clientId);
+    const kept = new Set(book.filter(keep).map((h) => h.id));
+    const rows = clientPositionRowsFor(book, own.clientName, own.cashBalance)
+      .filter((r) => kept.has(r.id))
+      .map((r, i) => ({ ...r, srNo: i + 1 }));
+    try {
+      await downloadClientHoldingsWorkbook(own.clientName, rows, own.cashBalance);
+      toast({ tone: 'success', title: 'Exported', description: `${rows.length} positions downloaded` });
+    } catch {
+      toast({ tone: 'error', title: 'Export failed' });
+    }
+  }
 
   /**
    * Loads the open position's lot history.
@@ -2081,6 +2127,11 @@ export default function HoldingsPage() {
             searchPlaceholder="Search symbols or companies…"
             onRowClick={(r) => setActiveSymbol(r)}
             onExport={(rows) => {
+              if (isClientLogin) {
+                const symbols = new Set(rows.map((r) => r.symbol));
+                void exportOwnHoldingsWorkbook((h) => symbols.has(h.ticker));
+                return;
+              }
               exportToCsv('holdings-by-symbol.csv', symbolColumns, rows);
               toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
             }}
@@ -2179,6 +2230,11 @@ export default function HoldingsPage() {
             searchPlaceholder="Search sectors…"
             onRowClick={(r) => setActiveSector(r)}
             onExport={(rows) => {
+              if (isClientLogin) {
+                const sectors = new Set(rows.map((r) => r.sector));
+                void exportOwnHoldingsWorkbook((h) => sectors.has(h.sector || 'Uncategorized'));
+                return;
+              }
               exportToCsv('holdings-by-sector.csv', sectorColumns, rows);
               toast({ tone: 'success', title: 'Exported', description: `${rows.length} rows downloaded` });
             }}
