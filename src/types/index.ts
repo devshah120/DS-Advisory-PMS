@@ -426,6 +426,68 @@ export interface BenchmarkReturns extends WatchlistReturns {
 }
 
 /**
+ * The watchlist generated from one client's book (GET /watchlist/client/:id).
+ *
+ * Unlike the manual watchlist's calendar price returns, each figure here is the
+ * money-weighted return of the CLIENT'S holding over the client's own windows:
+ * fiscal on the Indian book, clamped to the 30-June-2026 inception. Percent.
+ */
+export type ClientWatchlistWindow = 'mtd' | 'qtd' | 'ytd';
+
+export interface PositionWindowReturn {
+  returnPct: number | null;
+  openingValue: number;
+  closingValue: number;
+  netFlows: number;
+  /** Later than the window's `from` when the position was opened inside it. */
+  measuredFrom: string;
+  reason?: string;
+}
+
+export interface ClientWatchlistWindowMeta {
+  label: string;
+  from: string;
+  to: string;
+  clampedToInception: boolean;
+  nominalFrom: string | null;
+}
+
+export interface ClientWatchlistRow {
+  symbol: string;
+  company: string | null;
+  sector: string;
+  industry: string;
+  quantity: number;
+  price: number;
+  priceDate: string | null;
+  priceStatus: string | null;
+  marketValue: number;
+  mtd: PositionWindowReturn;
+  qtd: PositionWindowReturn;
+  ytd: PositionWindowReturn;
+}
+
+export interface ClientWatchlistBenchmark {
+  code: string;
+  label: string;
+  symbol: string;
+  mtd: number | null;
+  qtd: number | null;
+  ytd: number | null;
+}
+
+export interface ClientPortfolioWatchlist {
+  clientId: string;
+  clientName: string;
+  market: Market;
+  currency: string;
+  asOf: string;
+  windows: Record<ClientWatchlistWindow, ClientWatchlistWindowMeta>;
+  rows: ClientWatchlistRow[];
+  benchmarks: ClientWatchlistBenchmark[];
+}
+
+/**
  * The Event Center's event kinds.
  *
  * EARNINGS/DIVIDEND/SPLIT come from the Yahoo calendar; the rest come from the

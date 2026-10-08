@@ -1,5 +1,13 @@
 import { apiClient } from './api';
-import { Watchlist, WatchlistReturns, BenchmarkReturns, WatchlistFolder, WatchlistSlot, BulkAddResult } from '@/types';
+import {
+  Watchlist,
+  WatchlistReturns,
+  BenchmarkReturns,
+  WatchlistFolder,
+  WatchlistSlot,
+  BulkAddResult,
+  ClientPortfolioWatchlist,
+} from '@/types';
 import type { Market } from './market-scope';
 
 /**
@@ -41,6 +49,17 @@ export const watchlistApi = {
     const res = await apiClient
       .getClient()
       .get<BenchmarkReturns[]>('/watchlist/benchmarks', { params: market ? { market } : undefined });
+    return res.data;
+  },
+
+  /**
+   * A client's holdings as a watchlist, with the book's indices over the same
+   * windows. The market comes from the client record server-side, so none is sent.
+   */
+  async clientPortfolio(clientId: string): Promise<ClientPortfolioWatchlist> {
+    const res = await apiClient
+      .getClient()
+      .get<ClientPortfolioWatchlist>(`/watchlist/client/${encodeURIComponent(clientId)}`);
     return res.data;
   },
 

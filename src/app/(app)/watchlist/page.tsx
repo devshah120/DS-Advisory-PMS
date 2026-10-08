@@ -1,15 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Download, Hash, Loader2, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { Download, Hash, Loader2, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { watchlistApi } from '@/lib/watchlist.api';
 import { marketApi, SymbolNotFoundError } from '@/lib/market.api';
-import { formatCurrency, formatSignedPct, cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { displayTicker } from '@/lib/market-scope';
 import { Watchlist, WatchlistReturns, BenchmarkReturns, WatchlistFolder, WatchlistSlot } from '@/types';
 import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Card, Input, Button, Tabs, Modal, Textarea, useToast } from '@/components/ui';
+import { ReturnCell, SortableHeader, type SortDir } from '@/components/watchlist/WatchlistCells';
 
 type LookupStatus = 'idle' | 'loading' | 'found' | 'notfound' | 'error';
 const DEBOUNCE_MS = 500;
@@ -17,7 +18,6 @@ const SLOTS: WatchlistSlot[] = ['1', '2', '3', '4', '5'];
 
 type Row = Watchlist & { returns?: WatchlistReturns; returnsLoading: boolean };
 type SortKey = 'mtd' | 'qtd' | 'ytd';
-type SortDir = 'asc' | 'desc';
 
 export default function WatchlistPage() {
   usePageHeading({ title: "Watchlist", subtitle: "Tickers under watch, with MTD / QTD / YTD performance vs. benchmarks" });
@@ -477,81 +477,3 @@ export default function WatchlistPage() {
   );
 }
 
-function SortableHeader({
-  label,
-  sortKey,
-  active,
-  onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  active: { key: SortKey; dir: SortDir } | null;
-  onSort: (key: SortKey) => void;
-}) {
-  const isActive = active?.key === sortKey;
-  return (
-    <th className="px-4 py-3 text-right">
-      <button
-        onClick={() => onSort(sortKey)}
-        className={cn(
-          'inline-flex items-center gap-1 font-medium transition-colors hover:text-ink',
-          isActive ? 'text-ink' : 'text-ink-secondary'
-        )}
-      >
-        {label}
-        {isActive ? (
-          active.dir === 'desc' ? (
-            <ArrowDown className="h-3 w-3" />
-          ) : (
-            <ArrowUp className="h-3 w-3" />
-          )
-        ) : (
-          <ArrowDown className="h-3 w-3 opacity-30" />
-        )}
-      </button>
-    </th>
-  );
-}
-
-function ReturnCell({
-  value,
-  loading,
-  benchmark,
-  plain,
-}: {
-  value?: number | null;
-  loading: boolean;
-  benchmark?: number | null;
-  plain?: boolean;
-}) {
-  if (loading) {
-    return <td className="px-4 py-3 text-right text-ink-tertiary">…</td>;
-  }
-  // A null return is data we don't have, not a zero. Yahoo serves no daily
-  // history for some thinly-traded NSE SME scrips (the '-SM' series) — only a
-  // live quote — so there is no base close to measure the period against. The
-  // dash is honest; the tooltip is what stops it reading as a broken cell.
-  if (value == null) {
-    return (
-      <td
-        className="px-4 py-3 text-right text-ink-tertiary"
-        title="No price history available for this period"
-      >
-        —
-      </td>
-    );
-  }
-  // Underperformance vs. the primary benchmark (S&P 500) is flagged in red;
-  // everything else (including benchmark rows themselves) uses plain up/down coloring.
-  const underperforms = !plain && benchmark != null && value < benchmark;
-  return (
-    <td
-      className={cn(
-        'px-4 py-3 text-right font-semibold tabular-nums',
-        underperforms ? 'text-danger' : value >= 0 ? 'text-success' : 'text-danger'
-      )}
-    >
-      {formatSignedPct(value)}
-    </td>
-  );
-}

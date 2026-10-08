@@ -6,6 +6,7 @@ import {
   ArrowLeftRight,
   LineChart,
   Eye,
+  ListChecks,
   CalendarClock,
   FileText,
   Settings,
@@ -64,6 +65,9 @@ export const navSections: NavSection[] = [
     title: 'Insights',
     items: [
       { label: 'Watchlist', href: '/watchlist', icon: Eye },
+      // Generated from a client's book rather than typed in; a client login has
+      // only its own book, which Holdings already shows.
+      { label: 'Client Watchlist', href: '/watchlist/portfolio', icon: ListChecks, visible: isNotClientLogin },
       { label: 'Event Center', href: '/events', icon: CalendarClock },
       { label: 'News Center', href: '/news', icon: Newspaper },
       { label: 'Fundamentals', href: '/fundamentals', icon: Gauge },
