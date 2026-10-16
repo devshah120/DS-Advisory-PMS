@@ -523,7 +523,7 @@ function Preview({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
+      <div className="grid grid-cols-1 divide-y divide-border border-b border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <Metric
           label={isFamily ? 'Household return' : `Return · ${result.label}`}
           value={result.returnPct === null ? null : signedPct(result.returnPct)}
@@ -546,7 +546,7 @@ function Preview({
         />
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 px-4 py-3 text-[12.5px]">
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 px-4 py-3 text-[12.5px] sm:grid-cols-2">
         <Row label="Opening value" value={money(result.openingValue)} />
         <Row label="Net flows" value={money(result.netFlows)} />
         <Row label="Closing value" value={money(result.closingValue)} emphasis />

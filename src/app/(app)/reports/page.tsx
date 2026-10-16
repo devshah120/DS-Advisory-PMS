@@ -561,100 +561,102 @@ export default function ReportsPage() {
           {familyId ? (
             <FamilyInvoiceView invoice={invoice} loading={invoiceLoading} />
           ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                <th className="px-5 py-2.5">Client</th>
-                <th className="px-5 py-2.5 text-right">Annual Rate</th>
-                <th className="px-5 py-2.5 text-right">Billable Capital</th>
-                <th className="px-5 py-2.5 text-right">Days Billed</th>
-                <th className="px-5 py-2.5 text-right">Fee Amount</th>
-                <th className="px-5 py-2.5">Status</th>
-                <th className="px-5 py-2.5 text-right">Export</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {feesLoading ? (
-                <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                    Loading…
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                  <th className="px-5 py-2.5">Client</th>
+                  <th className="px-5 py-2.5 text-right">Annual Rate</th>
+                  <th className="px-5 py-2.5 text-right">Billable Capital</th>
+                  <th className="px-5 py-2.5 text-right">Days Billed</th>
+                  <th className="px-5 py-2.5 text-right">Fee Amount</th>
+                  <th className="px-5 py-2.5">Status</th>
+                  <th className="px-5 py-2.5 text-right">Export</th>
                 </tr>
-              ) : visibleFees.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                    No clients were billable in {selectedQuarter?.label ?? 'this quarter'}.
-                  </td>
-                </tr>
-              ) : (
-                visibleFees.map((f) => (
-                  <tr key={f.clientId} className="transition-colors hover:bg-surface-2">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
-                          <Percent className="h-4 w-4" />
-                        </span>
-                        <span className="text-[13px] font-medium text-ink">{f.clientName}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                      {formatPct(f.feeRatePercent)}
-                    </td>
-                    <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                      {formatCurrency(f.portfolioValue, f.currency ?? currency)}
-                    </td>
-                    <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
-                      {f.daysBilled} / {f.daysInQuarter}
-                      {/*
-                        The day-count above is the OPENING book's. Capital
-                        deployed mid-quarter is billed over its own, shorter
-                        window, so the row says how many such tranches exist
-                        rather than implying one number covers the whole fee.
-                      */}
-                      {proratedTrancheCount(f) > 0 && (
-                        <div className="text-[11px] text-ink-tertiary">
-                          +{proratedTrancheCount(f)} prorated
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                      {formatCurrency(f.feeAmount, f.currency ?? currency)}
-                    </td>
-                    <td className="px-5 py-3">
-                      <Badge tone={f.isEstimate ? 'warning' : 'success'} dot>
-                        {f.isEstimate ? 'Estimate' : 'Final'}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leftIcon={<Download className="h-3.5 w-3.5" />}
-                        loading={exportingId === f.clientId}
-                        onClick={() => exportClientFee(f)}
-                      >
-                        Export
-                      </Button>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {feesLoading ? (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                      Loading…
                     </td>
                   </tr>
-                ))
+                ) : visibleFees.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                      No clients were billable in {selectedQuarter?.label ?? 'this quarter'}.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleFees.map((f) => (
+                    <tr key={f.clientId} className="transition-colors hover:bg-surface-2">
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-surface-3 text-ink-secondary">
+                            <Percent className="h-4 w-4" />
+                          </span>
+                          <span className="text-[13px] font-medium text-ink">{f.clientName}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                        {formatPct(f.feeRatePercent)}
+                      </td>
+                      <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                        {formatCurrency(f.portfolioValue, f.currency ?? currency)}
+                      </td>
+                      <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
+                        {f.daysBilled} / {f.daysInQuarter}
+                        {/*
+                          The day-count above is the OPENING book's. Capital
+                          deployed mid-quarter is billed over its own, shorter
+                          window, so the row says how many such tranches exist
+                          rather than implying one number covers the whole fee.
+                        */}
+                        {proratedTrancheCount(f) > 0 && (
+                          <div className="text-[11px] text-ink-tertiary">
+                            +{proratedTrancheCount(f)} prorated
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                        {formatCurrency(f.feeAmount, f.currency ?? currency)}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Badge tone={f.isEstimate ? 'warning' : 'success'} dot>
+                          {f.isEstimate ? 'Estimate' : 'Final'}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={<Download className="h-3.5 w-3.5" />}
+                          loading={exportingId === f.clientId}
+                          onClick={() => exportClientFee(f)}
+                        >
+                          Export
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {!feesLoading && visibleFees.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-surface-2">
+                    <td className="px-5 py-3 text-[13px] font-semibold text-ink" colSpan={4}>
+                      Total
+                    </td>
+                    <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                      {/* Every row is from one book, so the book's currency is the total's. */}
+                      {formatCurrency(totalFeeAmount, currency)}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
               )}
-            </tbody>
-            {!feesLoading && visibleFees.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-border bg-surface-2">
-                  <td className="px-5 py-3 text-[13px] font-semibold text-ink" colSpan={4}>
-                    Total
-                  </td>
-                  <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                    {/* Every row is from one book, so the book's currency is the total's. */}
-                    {formatCurrency(totalFeeAmount, currency)}
-                  </td>
-                  <td colSpan={2} />
-                </tr>
-              </tfoot>
-            )}
-          </table>
+            </table>
+          </div>
           )}
         </div>
       </Modal>
@@ -711,74 +713,76 @@ function FamilyInvoiceView({
         </div>
       )}
 
-      <table className="w-full">
-        <thead>
-          <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-            <th className="px-5 py-2.5">Account</th>
-            <th className="px-5 py-2.5 text-right">Annual Rate</th>
-            <th className="px-5 py-2.5 text-right">Billable Capital</th>
-            <th className="px-5 py-2.5 text-right">Days Billed</th>
-            <th className="px-5 py-2.5 text-right">Fee Amount</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {invoice.lines.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                No account in this household was billable for {invoice.quarterLabel}.
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px]">
+          <thead>
+            <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              <th className="px-5 py-2.5">Account</th>
+              <th className="px-5 py-2.5 text-right">Annual Rate</th>
+              <th className="px-5 py-2.5 text-right">Billable Capital</th>
+              <th className="px-5 py-2.5 text-right">Days Billed</th>
+              <th className="px-5 py-2.5 text-right">Fee Amount</th>
             </tr>
-          ) : (
-            invoice.lines.map((line) => (
-              <tr key={line.clientId} className="hover:bg-surface-2">
-                <td className="px-5 py-3 text-[13px] font-medium text-ink">{line.clientName}</td>
-                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                  {line.feeRatePercent.toFixed(2)}%
-                </td>
-                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                  {formatCurrency(line.portfolioValue, line.currency || money)}
-                </td>
-                <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
-                  {line.daysBilled} / {line.daysInQuarter}
-                  {/* See the fee table: the count is the opening book's alone. */}
-                  {proratedTrancheCount(line) > 0 && (
-                    <div className="text-[11px] text-ink-tertiary">
-                      +{proratedTrancheCount(line)} prorated
-                    </div>
-                  )}
-                </td>
-                <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                  {formatCurrency(line.feeAmount, line.currency || money)}
+          </thead>
+          <tbody className="divide-y divide-border">
+            {invoice.lines.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                  No account in this household was billable for {invoice.quarterLabel}.
                 </td>
               </tr>
-            ))
+            ) : (
+              invoice.lines.map((line) => (
+                <tr key={line.clientId} className="hover:bg-surface-2">
+                  <td className="px-5 py-3 text-[13px] font-medium text-ink">{line.clientName}</td>
+                  <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                    {line.feeRatePercent.toFixed(2)}%
+                  </td>
+                  <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                    {formatCurrency(line.portfolioValue, line.currency || money)}
+                  </td>
+                  <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-tertiary">
+                    {line.daysBilled} / {line.daysInQuarter}
+                    {/* See the fee table: the count is the opening book's alone. */}
+                    {proratedTrancheCount(line) > 0 && (
+                      <div className="text-[11px] text-ink-tertiary">
+                        +{proratedTrancheCount(line)} prorated
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                    {formatCurrency(line.feeAmount, line.currency || money)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          {invoice.lines.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-border bg-surface-2">
+                <td className="px-5 py-3 text-[13px] font-semibold text-ink">
+                  Total due
+                  {invoice.totals.effectiveAnnualRatePercent !== null && (
+                    // An effective rate, not one anyone was charged — labelled so
+                    // it is never quoted back as the household's headline rate.
+                    <span className="ml-2 font-normal text-[12px] text-ink-tertiary">
+                      {invoice.totals.effectiveAnnualRatePercent.toFixed(2)}% effective
+                    </span>
+                  )}
+                </td>
+                <td />
+                <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
+                  {formatCurrency(invoice.totals.portfolioValue, money)}
+                </td>
+                <td />
+                <td className="px-5 py-3 text-right text-[14px] font-semibold tabular-nums text-ink">
+                  {formatCurrency(invoice.totals.feeAmount, money)}
+                </td>
+              </tr>
+            </tfoot>
           )}
-        </tbody>
-        {invoice.lines.length > 0 && (
-          <tfoot>
-            <tr className="border-t-2 border-border bg-surface-2">
-              <td className="px-5 py-3 text-[13px] font-semibold text-ink">
-                Total due
-                {invoice.totals.effectiveAnnualRatePercent !== null && (
-                  // An effective rate, not one anyone was charged — labelled so
-                  // it is never quoted back as the household's headline rate.
-                  <span className="ml-2 font-normal text-[12px] text-ink-tertiary">
-                    {invoice.totals.effectiveAnnualRatePercent.toFixed(2)}% effective
-                  </span>
-                )}
-              </td>
-              <td />
-              <td className="px-5 py-3 text-right text-[13px] font-semibold tabular-nums text-ink">
-                {formatCurrency(invoice.totals.portfolioValue, money)}
-              </td>
-              <td />
-              <td className="px-5 py-3 text-right text-[14px] font-semibold tabular-nums text-ink">
-                {formatCurrency(invoice.totals.feeAmount, money)}
-              </td>
-            </tr>
-          </tfoot>
-        )}
-      </table>
+        </table>
+      </div>
 
       {/* Named, not dropped: a household bill missing an account still looks
           complete, and the family is least able to notice the omission. */}

@@ -320,29 +320,31 @@ function QuoteTable({ quotes, loading }: { quotes: MarketQuote[]; loading: boole
     return <p className="py-4 text-sm text-ink-tertiary">No data available</p>;
   }
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs font-medium text-ink-secondary">
-          <th className="pb-2">Name</th>
-          <th className="pb-2 text-right">Price</th>
-          <th className="pb-2 text-right">Day</th>
-          <th className="pb-2 text-right">YTD</th>
-        </tr>
-      </thead>
-      <tbody>
-        {quotes.map((q) => (
-          <tr key={q.code} className="border-t border-border">
-            <td className="py-2.5 font-medium text-ink">{q.label}</td>
-            <td className="py-2.5 text-right tabular-nums text-ink">
-              {/* Per-quote currency: an Indian book's gold is still quoted in USD. */}
-              {q.currentPrice != null ? formatCurrency(q.currentPrice, q.currency) : '—'}
-            </td>
-            <ChangeCell value={q.dayChangePercent} />
-            <ChangeCell value={q.ytdChangePercent} />
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[300px] text-sm">
+        <thead>
+          <tr className="text-left text-xs font-medium text-ink-secondary">
+            <th className="pb-2">Name</th>
+            <th className="pb-2 text-right">Price</th>
+            <th className="pb-2 text-right">Day</th>
+            <th className="pb-2 text-right">YTD</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {quotes.map((q) => (
+            <tr key={q.code} className="border-t border-border">
+              <td className="py-2.5 font-medium text-ink">{q.label}</td>
+              <td className="py-2.5 text-right tabular-nums text-ink">
+                {/* Per-quote currency: an Indian book's gold is still quoted in USD. */}
+                {q.currentPrice != null ? formatCurrency(q.currentPrice, q.currency) : '—'}
+              </td>
+              <ChangeCell value={q.dayChangePercent} />
+              <ChangeCell value={q.ytdChangePercent} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -368,26 +370,28 @@ function ClientMoversTable({
     return <p className="py-4 text-sm text-ink-tertiary">No data available</p>;
   }
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs font-medium text-ink-secondary">
-          <th className="pb-2">Client</th>
-          <th className="pb-2 text-right">Value</th>
-          <th className="pb-2 text-right">Day</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.clientId} className="border-t border-border">
-            <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
-            <td className="py-2.5 text-right tabular-nums text-ink">
-              {formatCurrency(r.marketValue, currency)}
-            </td>
-            <ChangeCell value={r.changePercent} />
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[280px] text-sm">
+        <thead>
+          <tr className="text-left text-xs font-medium text-ink-secondary">
+            <th className="pb-2">Client</th>
+            <th className="pb-2 text-right">Value</th>
+            <th className="pb-2 text-right">Day</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.clientId} className="border-t border-border">
+              <td className="py-2.5 font-medium text-ink">{r.clientName}</td>
+              <td className="py-2.5 text-right tabular-nums text-ink">
+                {formatCurrency(r.marketValue, currency)}
+              </td>
+              <ChangeCell value={r.changePercent} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

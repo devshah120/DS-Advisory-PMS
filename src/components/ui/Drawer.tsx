@@ -64,7 +64,7 @@ export function Drawer({
             exit={{ x: '100%' }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
               <div>
                 {title && <h2 className="text-base font-semibold text-ink">{title}</h2>}
                 {description && (
@@ -75,7 +75,7 @@ export function Drawer({
                 {maximizable && (
                   <button
                     onClick={() => setMaximized((m) => !m)}
-                    className="-mr-1 rounded-lg p-1.5 text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink"
+                    className="-mr-1 hidden rounded-lg p-1.5 text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink sm:block"
                     title={maximized ? 'Restore' : 'Maximize'}
                   >
                     {maximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -89,7 +89,7 @@ export function Drawer({
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">{children}</div>
           </motion.aside>
         </div>
       )}

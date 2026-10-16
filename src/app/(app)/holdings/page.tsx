@@ -2366,7 +2366,7 @@ export default function HoldingsPage() {
                     <div className="space-y-2.5">
                       {familyAggregate.sectorAllocation.map((s) => (
                         <div key={s.sector} className="flex items-center gap-3">
-                          <span className="w-40 shrink-0 truncate text-2xs text-ink-secondary">
+                          <span className="w-24 shrink-0 truncate text-2xs text-ink-secondary sm:w-40">
                             {s.sector}
                           </span>
                           <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-3">
@@ -2958,7 +2958,7 @@ export default function HoldingsPage() {
               </div>
 
               {importResult.results.length > 0 && (
-                <div className="max-h-56 overflow-y-auto rounded-[12px] border border-border">
+                <div className="max-h-56 overflow-auto rounded-[12px] border border-border">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-surface-2 text-xs text-ink-tertiary">
                       <tr>

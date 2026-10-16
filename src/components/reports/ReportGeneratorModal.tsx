@@ -546,7 +546,7 @@ export function ReportGeneratorModal({
                   />
                 </div>
 
-                <div className="overflow-hidden rounded-[10px] border border-border">
+                <div className="overflow-x-auto rounded-[10px] border border-border">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
@@ -762,7 +762,7 @@ export function ReportGeneratorModal({
             )}
 
             {reportId === 'holdings-statement' && !empty && (
-              <div className="overflow-hidden rounded-[10px] border border-border">
+              <div className="overflow-x-auto rounded-[10px] border border-border">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">

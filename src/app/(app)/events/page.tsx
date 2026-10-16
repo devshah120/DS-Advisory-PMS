@@ -150,56 +150,58 @@ function HolderBreakdown({ event, currency }: {
         </p>
       )}
 
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-ink-tertiary">
-            <th className="pb-1 text-left font-medium">Client</th>
-            <th className="pb-1 text-right font-medium">Shares</th>
-            {hasEstimate && <th className="pb-1 text-right font-medium">This pay</th>}
-            {hasAmounts && <th className="pb-1 text-right font-medium">Annual</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {event.holders.map((h) => (
-            <tr key={h.clientId} className="border-t border-border/60">
-              <td className="max-w-[130px] truncate py-1 pr-2 text-ink-secondary">{h.clientName}</td>
-              <td className="py-1 text-right tabular-nums text-ink-secondary">
-                {formatNumber(h.quantity, 0)}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[260px] text-xs">
+          <thead>
+            <tr className="text-ink-tertiary">
+              <th className="pb-1 text-left font-medium">Client</th>
+              <th className="pb-1 text-right font-medium">Shares</th>
+              {hasEstimate && <th className="pb-1 text-right font-medium">This pay</th>}
+              {hasAmounts && <th className="pb-1 text-right font-medium">Annual</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {event.holders.map((h) => (
+              <tr key={h.clientId} className="border-t border-border/60">
+                <td className="max-w-[130px] truncate py-1 pr-2 text-ink-secondary">{h.clientName}</td>
+                <td className="py-1 text-right tabular-nums text-ink-secondary">
+                  {formatNumber(h.quantity, 0)}
+                </td>
+                {hasEstimate && (
+                  <td className="py-1 pl-2 text-right tabular-nums text-ink">
+                    {h.estimatedAmount != null ? formatCurrency(h.estimatedAmount, currency) : '—'}
+                  </td>
+                )}
+                {hasAmounts && (
+                  <td className="py-1 pl-2 text-right tabular-nums text-ink-secondary">
+                    {h.annualAmount != null ? formatCurrency(h.annualAmount, currency) : '—'}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-border font-semibold text-ink">
+              <td className="pt-1.5">
+                {event.clientCount} client{event.clientCount === 1 ? '' : 's'}
+              </td>
+              <td className="pt-1.5 text-right tabular-nums">
+                {formatNumber(event.totalQuantity, 0)}
               </td>
               {hasEstimate && (
-                <td className="py-1 pl-2 text-right tabular-nums text-ink">
-                  {h.estimatedAmount != null ? formatCurrency(h.estimatedAmount, currency) : '—'}
+                <td className="pt-1.5 pl-2 text-right tabular-nums">
+                  {formatCurrency(event.totalEstimatedAmount!, currency)}
                 </td>
               )}
               {hasAmounts && (
-                <td className="py-1 pl-2 text-right tabular-nums text-ink-secondary">
-                  {h.annualAmount != null ? formatCurrency(h.annualAmount, currency) : '—'}
+                <td className="pt-1.5 pl-2 text-right tabular-nums">
+                  {formatCurrency(event.totalAnnualAmount!, currency)}
                 </td>
               )}
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-border font-semibold text-ink">
-            <td className="pt-1.5">
-              {event.clientCount} client{event.clientCount === 1 ? '' : 's'}
-            </td>
-            <td className="pt-1.5 text-right tabular-nums">
-              {formatNumber(event.totalQuantity, 0)}
-            </td>
-            {hasEstimate && (
-              <td className="pt-1.5 pl-2 text-right tabular-nums">
-                {formatCurrency(event.totalEstimatedAmount!, currency)}
-              </td>
-            )}
-            {hasAmounts && (
-              <td className="pt-1.5 pl-2 text-right tabular-nums">
-                {formatCurrency(event.totalAnnualAmount!, currency)}
-              </td>
-            )}
-          </tr>
-        </tfoot>
-      </table>
+          </tfoot>
+        </table>
+      </div>
 
       {hasEstimate && (
         <p className="mt-2 border-t border-border pt-1.5 text-[11px] leading-snug text-ink-tertiary">

@@ -17,6 +17,7 @@ import {
   UserPlus,
   Settings,
   LogOut,
+  Menu,
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { FlagIcon } from '@/components/ui/FlagIcon';
@@ -28,6 +29,8 @@ import { ALL_MARKETS, MARKET_META } from '@/lib/market-scope';
 
 interface HeaderProps {
   onOpenCommand: () => void;
+  /** Opens the sidebar drawer — the only way to the nav below `lg`. */
+  onOpenMobileNav: () => void;
   onLogout: () => void;
 }
 
@@ -65,7 +68,7 @@ const notifications = [
   { icon: CalendarClock, tone: 'text-warning', title: 'Quarterly review due Friday', time: '3h ago' },
 ];
 
-export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
+export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: HeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { market, meta, setMarket } = useMarket();
@@ -76,13 +79,30 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
   const { profile } = useSession();
 
   const segments = pathname.split('/').filter(Boolean);
+  const crumbFor = (seg: string) => crumbLabels[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border glass px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border glass px-3 sm:h-16 sm:gap-3 sm:px-6 md:gap-4">
+      {/* Mobile nav toggle — the sidebar is a drawer below lg. */}
+      <button
+        onClick={onOpenMobileNav}
+        aria-label="Open menu"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-ink-secondary transition-colors hover:bg-surface-3 hover:text-ink lg:hidden"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      {/* Small screens get only the current page; the full trail would wrap
+          the firm name across three lines and push the controls off-screen. */}
+      <p className="min-w-0 truncate text-[14px] font-semibold text-ink md:hidden">
+        {segments.length ? crumbFor(segments[segments.length - 1]) : 'Dashboard'}
+      </p>
+
       {/* Breadcrumbs */}
-      <nav className="flex min-w-0 items-center gap-1.5 text-[13px]">
+      <nav className="hidden min-w-0 items-center gap-1.5 text-[13px] md:flex">
         <Link href="/dashboard" className="font-medium text-ink-tertiary hover:text-ink">
-          Giriraj Global Consultants
+          <span className="hidden lg:inline">Giriraj Global Consultants</span>
+          <span className="lg:hidden">GGC</span>
         </Link>
         {segments.map((seg, i) => {
           const last = i === segments.length - 1;
@@ -95,7 +115,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
                   last ? 'font-semibold text-ink' : 'font-medium text-ink-tertiary'
                 )}
               >
-                {crumbLabels[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1)}
+                {crumbFor(seg)}
               </span>
             </span>
           );
@@ -103,6 +123,16 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
       </nav>
 
       <div className="flex-1" />
+
+      {/* Search on small screens — the palette is also the quickest way to a
+          client or symbol when there is no room for the full search field. */}
+      <button
+        onClick={onOpenCommand}
+        aria-label="Search"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-ink-secondary transition-colors hover:bg-surface-3 hover:text-ink md:hidden"
+      >
+        <Search className="h-[18px] w-[18px]" />
+      </button>
 
       {/* Global search trigger */}
       <button
@@ -139,7 +169,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
         })}
         trigger={
           <button
-            className="flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2"
+            className="flex h-9 items-center gap-1.5 rounded-[10px] border border-border bg-white px-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface-2 sm:gap-2 sm:px-3"
             title={`Showing the ${meta.label} book (${meta.currency})`}
           >
             <FlagIcon market={market} />
@@ -157,7 +187,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
           { label: 'Add Holding', icon: <Plus className="h-4 w-4" />, onClick: () => router.push('/symbols/add') },
         ]}
         trigger={
-          <button className="flex h-9 items-center gap-1.5 rounded-[10px] bg-brand px-3 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-hover">
+          <button className="flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-brand px-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-brand-hover">
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">New</span>
           </button>
@@ -182,7 +212,7 @@ export default function Header({ onOpenCommand, onLogout }: HeaderProps) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -8, scale: 0.97 }}
                 transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-[14px] border border-border bg-white shadow-lg"
+                className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-[14px] border border-border bg-white shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80"
               >
                 <div className="flex items-center justify-between border-b border-border px-4 py-3">
                   <p className="text-sm font-semibold text-ink">Notifications</p>

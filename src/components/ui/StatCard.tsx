@@ -46,7 +46,7 @@ export function StatCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.05, ease: [0.16, 1, 0.3, 1] }}
-      className="card card-hover p-5"
+      className="card card-hover p-4 sm:p-5"
     >
       <div className="flex items-start justify-between">
         <p className="text-[13px] font-medium text-ink-secondary">{label}</p>
@@ -66,7 +66,7 @@ export function StatCard({
         <AnimatedNumber
           value={value}
           format={format}
-          className="value-display text-[26px] font-semibold leading-none text-ink"
+          className="value-display text-[22px] font-semibold leading-none text-ink sm:text-[26px]"
         />
         {spark && <div className="h-9 w-20 shrink-0">{spark}</div>}
       </div>

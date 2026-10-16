@@ -316,7 +316,7 @@ export function EditPositionModal({
             <p className="py-6 text-center text-[13px] text-ink-secondary">Loading fills…</p>
           ) : (
             <>
-              <div className="overflow-hidden rounded-[10px] border border-border">
+              <div className="overflow-x-auto rounded-[10px] border border-border">
                 <table className="w-full text-[13px]">
                   <thead className="bg-surface-2 text-ink-secondary">
                     <tr>

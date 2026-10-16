@@ -436,86 +436,88 @@ export default function SubscriptionPage() {
               subtitle="Every portfolio manager login and where its subscription stands"
             />
           </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                <th className="px-5 py-2.5">Manager</th>
-                <th className="px-5 py-2.5">Status</th>
-                <th className="px-5 py-2.5 text-right">Days Left</th>
-                <th className="px-5 py-2.5">Renews / Expires</th>
-                <th className="px-5 py-2.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {subscribers.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
-                    No portfolio managers yet.
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="border-y border-border bg-surface-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                  <th className="px-5 py-2.5">Manager</th>
+                  <th className="px-5 py-2.5">Status</th>
+                  <th className="px-5 py-2.5 text-right">Days Left</th>
+                  <th className="px-5 py-2.5">Renews / Expires</th>
+                  <th className="px-5 py-2.5 text-right">Actions</th>
                 </tr>
-              ) : (
-                subscribers.map((s) => {
-                  const deadline = s.currentPeriodEnd ?? s.trialEndsAt;
-                  return (
-                    <tr key={s.id} className="transition-colors hover:bg-surface-2">
-                      <td className="px-5 py-3">
-                        <p className="text-[13px] font-medium text-ink">{s.name}</p>
-                        <p className="text-[12.5px] text-ink-tertiary">{s.email}</p>
-                      </td>
-                      <td className="px-5 py-3">
-                        {s.status ? (
-                          <Badge tone={statusTone[s.status]} dot>
-                            {STATUS_LABELS[s.status]}
-                          </Badge>
-                        ) : (
-                          <span className="text-[13px] text-ink-tertiary">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
-                        {s.daysRemaining ?? '—'}
-                      </td>
-                      <td className="px-5 py-3 text-[13px] text-ink-secondary">
-                        {deadline ? formatDate(new Date(deadline)) : '—'}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            leftIcon={<CalendarPlus className="h-3.5 w-3.5" />}
-                            onClick={() => {
-                              setExtendDays('30');
-                              setExtending(s);
-                            }}
-                          >
-                            Extend
-                          </Button>
-                          {s.status === 'ACTIVE' ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setStatus(s, 'CANCELLED')}
-                            >
-                              Cancel
-                            </Button>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {subscribers.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-[13px] text-ink-tertiary">
+                      No portfolio managers yet.
+                    </td>
+                  </tr>
+                ) : (
+                  subscribers.map((s) => {
+                    const deadline = s.currentPeriodEnd ?? s.trialEndsAt;
+                    return (
+                      <tr key={s.id} className="transition-colors hover:bg-surface-2">
+                        <td className="px-5 py-3">
+                          <p className="text-[13px] font-medium text-ink">{s.name}</p>
+                          <p className="text-[12.5px] text-ink-tertiary">{s.email}</p>
+                        </td>
+                        <td className="px-5 py-3">
+                          {s.status ? (
+                            <Badge tone={statusTone[s.status]} dot>
+                              {STATUS_LABELS[s.status]}
+                            </Badge>
                           ) : (
+                            <span className="text-[13px] text-ink-tertiary">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right text-[13px] tabular-nums text-ink-secondary">
+                          {s.daysRemaining ?? '—'}
+                        </td>
+                        <td className="px-5 py-3 text-[13px] text-ink-secondary">
+                          {deadline ? formatDate(new Date(deadline)) : '—'}
+                        </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
-                              leftIcon={<CreditCard className="h-3.5 w-3.5" />}
-                              onClick={() => setStatus(s, 'ACTIVE')}
+                              leftIcon={<CalendarPlus className="h-3.5 w-3.5" />}
+                              onClick={() => {
+                                setExtendDays('30');
+                                setExtending(s);
+                              }}
                             >
-                              Mark paid
+                              Extend
                             </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                            {s.status === 'ACTIVE' ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setStatus(s, 'CANCELLED')}
+                              >
+                                Cancel
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                leftIcon={<CreditCard className="h-3.5 w-3.5" />}
+                                onClick={() => setStatus(s, 'ACTIVE')}
+                              >
+                                Mark paid
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 

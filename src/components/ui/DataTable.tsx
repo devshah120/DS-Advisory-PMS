@@ -168,7 +168,7 @@ export function DataTable<T>({
     <div className="card overflow-hidden p-0">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative min-w-0 basis-full sm:min-w-[200px] sm:basis-auto sm:flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-tertiary" />
           <input
             value={query}
@@ -256,11 +256,11 @@ export function DataTable<T>({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden border-b border-border bg-brand-soft"
           >
-            <div className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
               <span className="text-[13px] font-medium text-brand">
                 {selected.size} selected
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {bulkActions?.(selectedRows, clearSelection)}
                 <Button variant="ghost" size="sm" onClick={clearSelection}>
                   Clear
@@ -406,7 +406,10 @@ export function DataTable<T>({
                   key={p}
                   onClick={() => setPage(p)}
                   className={cn(
+                    // Page numbers beyond the current one's neighbours drop out
+                    // on phones; prev/next still reach them.
                     'h-9 min-w-9 rounded-[10px] px-2 text-[13px] font-medium tabular-nums transition-colors',
+                    Math.abs(p - currentPage) > 1 && 'hidden sm:inline-block',
                     p === currentPage
                       ? 'bg-brand text-white'
                       : 'text-ink-secondary hover:bg-surface-3 hover:text-ink'

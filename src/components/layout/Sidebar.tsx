@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { PanelLeftClose, PanelLeft, ChevronRight } from 'lucide-react';
-import { navSectionsFor, NavItem } from '@/lib/navigation';
+import { PanelLeftClose, PanelLeft, ChevronRight, X } from 'lucide-react';
+import { navSectionsFor, NavItem, NavSection } from '@/lib/navigation';
 import { useSession } from './SessionContext';
 import { BrandMark } from './BrandMark';
 import { cn } from '@/lib/utils';
@@ -13,9 +13,12 @@ import { cn } from '@/lib/utils';
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  /** Below `lg` the sidebar is an off-canvas drawer; this is whether it is out. */
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
-export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { role } = useSession();
 
@@ -24,14 +27,121 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Role-gated items (currently just Users) are dropped for everyone else.
   const sections = useMemo(() => navSectionsFor(role), [role]);
 
+  // The drawer covers the page, so it locks scroll and answers Escape the way
+  // the app's other overlays do.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onMobileClose();
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileOpen, onMobileClose]);
+
   return (
-    <motion.aside
-      animate={{ width: collapsed ? 76 : 264 }}
-      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      className="sticky top-0 z-40 flex h-screen flex-col border-r border-border bg-white"
-    >
+    <>
+      {/* Desktop rail — inline and collapsible. Hidden below lg, where a 264px
+          column would leave a phone with almost no room for the page. */}
+      <motion.aside
+        animate={{ width: collapsed ? 76 : 264 }}
+        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        className="sticky top-0 z-40 hidden h-screen shrink-0 flex-col border-r border-border bg-white lg:flex"
+      >
+        <SidebarBody
+          sections={sections}
+          isActive={isActive}
+          collapsed={collapsed}
+          layoutPrefix="rail"
+          footer={
+            <button
+              onClick={onToggle}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-[13px] font-medium text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink',
+                collapsed && 'justify-center px-0'
+              )}
+            >
+              {collapsed ? (
+                <PanelLeft className="h-4.5 w-4.5" />
+              ) : (
+                <>
+                  <PanelLeftClose className="h-4.5 w-4.5" />
+                  <span>Collapse</span>
+                </>
+              )}
+            </button>
+          }
+        />
+      </motion.aside>
+
+      {/* Mobile / tablet drawer — never collapsed, closes on navigation (the
+          shell clears `mobileOpen` when the route changes). */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <div className="fixed inset-0 z-[90] lg:hidden">
+            <motion.div
+              className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={onMobileClose}
+            />
+            <motion.aside
+              className="absolute left-0 top-0 flex h-full w-[280px] max-w-[85vw] flex-col border-r border-border bg-white shadow-xl"
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <SidebarBody
+                sections={sections}
+                isActive={isActive}
+                collapsed={false}
+                layoutPrefix="drawer"
+                headerAction={
+                  <button
+                    onClick={onMobileClose}
+                    aria-label="Close menu"
+                    className="ml-auto rounded-lg p-1.5 text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                }
+              />
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function SidebarBody({
+  sections,
+  isActive,
+  collapsed,
+  layoutPrefix,
+  headerAction,
+  footer,
+}: {
+  sections: NavSection[];
+  isActive: (href: string) => boolean;
+  collapsed: boolean;
+  /**
+   * Both the rail and the drawer are mounted at once (one hidden by CSS), so
+   * their active-pill `layoutId`s must differ or framer animates between them.
+   */
+  layoutPrefix: string;
+  headerAction?: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <>
       {/* Brand */}
-      <div className="flex h-16 items-center gap-3 px-4">
+      <div className="flex h-16 shrink-0 items-center gap-3 px-4">
         <BrandMark size={36} />
         <AnimatePresence>
           {!collapsed && (
@@ -46,6 +156,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </motion.div>
           )}
         </AnimatePresence>
+        {headerAction}
       </div>
 
       {/* Scroll area */}
@@ -58,6 +169,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 item={item}
                 active={isActive(item.href)}
                 collapsed={collapsed}
+                layoutPrefix={layoutPrefix}
               />
             ))}
           </SidebarGroup>
@@ -65,25 +177,8 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-border p-3">
-        <button
-          onClick={onToggle}
-          className={cn(
-            'flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-[13px] font-medium text-ink-tertiary transition-colors hover:bg-surface-3 hover:text-ink',
-            collapsed && 'justify-center px-0'
-          )}
-        >
-          {collapsed ? (
-            <PanelLeft className="h-4.5 w-4.5" />
-          ) : (
-            <>
-              <PanelLeftClose className="h-4.5 w-4.5" />
-              <span>Collapse</span>
-            </>
-          )}
-        </button>
-      </div>
-    </motion.aside>
+      {footer && <div className="border-t border-border p-3">{footer}</div>}
+    </>
   );
 }
 
@@ -115,10 +210,12 @@ function SidebarLink({
   item,
   active,
   collapsed,
+  layoutPrefix,
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
+  layoutPrefix: string;
 }) {
   const Icon = item.icon;
   return (
@@ -133,14 +230,14 @@ function SidebarLink({
     >
       {active && (
         <motion.span
-          layoutId="sidebar-active"
+          layoutId={`${layoutPrefix}-sidebar-active`}
           className="absolute inset-0 rounded-[10px] bg-brand-soft"
           transition={{ type: 'spring', stiffness: 400, damping: 34 }}
         />
       )}
       {active && !collapsed && (
         <motion.span
-          layoutId="sidebar-active-bar"
+          layoutId={`${layoutPrefix}-sidebar-active-bar`}
           className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-brand"
           transition={{ type: 'spring', stiffness: 400, damping: 34 }}
         />

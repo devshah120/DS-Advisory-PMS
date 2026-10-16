@@ -49,7 +49,7 @@ export function Dropdown({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.97 }}
             transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-            style={{ width }}
+            style={{ width, maxWidth: 'calc(100vw - 1.5rem)' }}
             className={cn(
               'absolute z-50 mt-2 overflow-hidden rounded-[12px] border border-border bg-white p-1.5 shadow-lg',
               align === 'right' ? 'right-0' : 'left-0'

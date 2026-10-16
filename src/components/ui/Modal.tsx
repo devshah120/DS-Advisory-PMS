@@ -65,7 +65,7 @@ export function Modal({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] flex items-end justify-center p-0 sm:items-center sm:p-4">
           <motion.div
             className="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"
             initial={{ opacity: 0 }}
@@ -76,7 +76,7 @@ export function Modal({
           />
           <motion.div
             className={cn(
-              'relative w-full overflow-hidden rounded-[16px] border border-border bg-white shadow-xl',
+              'relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[16px] border border-border bg-white shadow-xl sm:max-h-[90vh] sm:rounded-[16px]',
               sizeMap[size]
             )}
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
@@ -85,7 +85,7 @@ export function Modal({
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
           >
             {title || description ? (
-              <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
+              <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
                 <div>
                   {title && <h2 className="text-base font-semibold text-ink">{title}</h2>}
                   {description && (
@@ -114,9 +114,9 @@ export function Modal({
             )}
             {/* Capped so a long report table scrolls inside the modal instead of
                 pushing the header and footer off the viewport. */}
-            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">{children}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:max-h-[70vh] sm:px-6 sm:py-5">{children}</div>
             {footer && (
-              <div className="flex items-center justify-end gap-3 border-t border-border bg-surface-2 px-6 py-4">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
                 {footer}
               </div>
             )}

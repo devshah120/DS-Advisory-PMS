@@ -617,7 +617,7 @@ export default function TransactionsPage() {
               </div>
             )}
 
-            <div className="max-h-56 overflow-y-auto rounded-[12px] border border-border">
+            <div className="max-h-56 overflow-auto rounded-[12px] border border-border">
               <table className="w-full">
                 <tbody className="divide-y divide-border">
                   {pending.rows.map((r) => {

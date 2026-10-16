@@ -23,7 +23,7 @@ export function Tabs({
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-1 rounded-[12px] border border-border bg-surface-2 p-1',
+        'inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[12px] border border-border bg-surface-2 p-1',
         className
       )}
     >
@@ -34,7 +34,7 @@ export function Tabs({
             key={tab.value}
             onClick={() => onChange(tab.value)}
             className={cn(
-              'relative z-10 inline-flex items-center gap-1.5 rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+              'relative z-10 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[9px] px-3 py-1.5 text-[13px] font-medium transition-colors sm:px-3.5',
               active ? 'text-ink' : 'text-ink-secondary hover:text-ink'
             )}
           >

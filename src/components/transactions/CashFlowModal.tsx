@@ -181,7 +181,7 @@ export function CashFlowModal({
           {/* How to change the balance — set an exact figure, or nudge it up/down. */}
           <div>
             <label className="mb-2 block text-[13px] font-medium text-ink">How</label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
               <ModeButton
                 active={mode === 'set'}
                 onClick={() => setMode('set')}

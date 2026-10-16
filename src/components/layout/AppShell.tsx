@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { apiClient } from '@/lib/api';
@@ -59,6 +59,14 @@ function AppShellInner({
   const [ready, setReady] = useState(!requireAuth);
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
+
+  // Picking a page from the mobile drawer navigates; the drawer should not
+  // still be covering the page that just loaded.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!requireAuth) return;
@@ -128,24 +136,33 @@ function AppShellInner({
 
   return (
     <div className="flex min-h-screen w-full bg-app">
-      <Sidebar collapsed={collapsed} onToggle={toggleCollapse} />
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={toggleCollapse}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={closeMobileNav}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header onOpenCommand={() => setCmdOpen(true)} onLogout={handleLogout} />
+        <Header
+          onOpenCommand={() => setCmdOpen(true)}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+          onLogout={handleLogout}
+        />
 
         <main className="min-w-0 flex-1">
-          <div className="mx-auto w-full min-w-0 max-w-[1440px] px-6 py-7 lg:px-8">
+          <div className="mx-auto w-full min-w-0 max-w-[1440px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
             {(title || actions) && (
-              <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-                <div>
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-3 sm:mb-7 sm:gap-4">
+                <div className="min-w-0">
                   {title && (
-                    <h1 className="text-[26px] font-semibold tracking-tight text-ink">{title}</h1>
+                    <h1 className="text-[22px] font-semibold tracking-tight text-ink sm:text-[26px]">{title}</h1>
                   )}
                   {subtitle && (
-                    <p className="mt-1 text-[14px] text-ink-secondary">{subtitle}</p>
+                    <p className="mt-1 text-[13px] text-ink-secondary sm:text-[14px]">{subtitle}</p>
                   )}
                 </div>
-                {actions && <div className="flex items-center gap-3">{actions}</div>}
+                {actions && <div className="flex flex-wrap items-center gap-2 sm:gap-3">{actions}</div>}
               </div>
             )}
             {/* Keyed on the route so the enter animation replays per page — it
