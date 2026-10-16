@@ -100,7 +100,6 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                 sections={sections}
                 isActive={isActive}
                 collapsed={false}
-                layoutPrefix="drawer"
                 headerAction={
                   <button
                     onClick={onMobileClose}
@@ -131,10 +130,12 @@ function SidebarBody({
   isActive: (href: string) => boolean;
   collapsed: boolean;
   /**
-   * Both the rail and the drawer are mounted at once (one hidden by CSS), so
-   * their active-pill `layoutId`s must differ or framer animates between them.
+   * Namespaces the sliding active-pill `layoutId`s. Only the rail sets it: the
+   * drawer and rail are mounted together, so sharing ids would animate between
+   * them, and a pill that slides while the drawer exits on navigation leaves
+   * AnimatePresence waiting on it — the drawer would stay open over the page.
    */
-  layoutPrefix: string;
+  layoutPrefix?: string;
   headerAction?: React.ReactNode;
   footer?: React.ReactNode;
 }) {
@@ -215,7 +216,7 @@ function SidebarLink({
   item: NavItem;
   active: boolean;
   collapsed: boolean;
-  layoutPrefix: string;
+  layoutPrefix?: string;
 }) {
   const Icon = item.icon;
   return (
@@ -230,14 +231,14 @@ function SidebarLink({
     >
       {active && (
         <motion.span
-          layoutId={`${layoutPrefix}-sidebar-active`}
+          layoutId={layoutPrefix && `${layoutPrefix}-sidebar-active`}
           className="absolute inset-0 rounded-[10px] bg-brand-soft"
           transition={{ type: 'spring', stiffness: 400, damping: 34 }}
         />
       )}
       {active && !collapsed && (
         <motion.span
-          layoutId={`${layoutPrefix}-sidebar-active-bar`}
+          layoutId={layoutPrefix && `${layoutPrefix}-sidebar-active-bar`}
           className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-brand"
           transition={{ type: 'spring', stiffness: 400, damping: 34 }}
         />

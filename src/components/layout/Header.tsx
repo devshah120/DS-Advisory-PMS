@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -73,6 +73,23 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
   const router = useRouter();
   const { market, meta, setMarket } = useMarket();
   const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  // Close on any press outside the panel. A full-screen fixed backdrop can't do
+  // this from in here: the header's backdrop-filter makes it the containing
+  // block for fixed children, so such a backdrop only ever covered the header.
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [notifOpen]);
   // Shared with the Sidebar via SessionProvider, so the profile is fetched once
   // for the shell rather than once per consumer. A failed load leaves this null
   // and the avatar falls back to a neutral placeholder.
@@ -82,7 +99,7 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
   const crumbFor = (seg: string) => crumbLabels[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1);
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border glass px-3 sm:h-16 sm:gap-3 sm:px-6 md:gap-4">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-1 border-b border-border glass px-2 sm:h-16 sm:gap-3 sm:px-6 md:gap-4">
       {/* Mobile nav toggle — the sidebar is a drawer below lg. */}
       <button
         onClick={onOpenMobileNav}
@@ -94,7 +111,7 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
 
       {/* Small screens get only the current page; the full trail would wrap
           the firm name across three lines and push the controls off-screen. */}
-      <p className="min-w-0 truncate text-[14px] font-semibold text-ink md:hidden">
+      <p className="ml-1 min-w-0 truncate text-[14px] font-semibold text-ink md:hidden">
         {segments.length ? crumbFor(segments[segments.length - 1]) : 'Dashboard'}
       </p>
 
@@ -174,7 +191,7 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
           >
             <FlagIcon market={market} />
             <span className="hidden sm:inline">{meta.shortLabel}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
+            <ChevronDown className="hidden h-3.5 w-3.5 text-ink-tertiary sm:block" />
           </button>
         }
       />
@@ -195,7 +212,7 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
       />
 
       {/* Notifications */}
-      <div className="relative">
+      <div ref={notifRef} className="relative">
         <button
           onClick={() => setNotifOpen((v) => !v)}
           className="relative flex h-9 w-9 items-center justify-center rounded-[10px] text-ink-secondary transition-colors hover:bg-surface-3 hover:text-ink"
@@ -205,40 +222,37 @@ export default function Header({ onOpenCommand, onOpenMobileNav, onLogout }: Hea
         </button>
         <AnimatePresence>
           {notifOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-              <motion.div
-                initial={{ opacity: 0, y: -8, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.97 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-[14px] border border-border bg-white shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80"
-              >
-                <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                  <p className="text-sm font-semibold text-ink">Notifications</p>
-                  <span className="chip bg-brand-soft text-brand">3 new</span>
-                </div>
-                <div className="divide-y divide-border">
-                  {notifications.map((n, i) => {
-                    const Icon = n.icon;
-                    return (
-                      <div key={i} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-2">
-                        <span className={cn('mt-0.5', n.tone)}>
-                          <Icon className="h-4.5 w-4.5" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium text-ink">{n.title}</p>
-                          <p className="text-xs text-ink-tertiary">{n.time}</p>
-                        </div>
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.97 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-[14px] border border-border bg-white shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80"
+            >
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <p className="text-sm font-semibold text-ink">Notifications</p>
+                <span className="chip bg-brand-soft text-brand">3 new</span>
+              </div>
+              <div className="divide-y divide-border">
+                {notifications.map((n, i) => {
+                  const Icon = n.icon;
+                  return (
+                    <div key={i} className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-2">
+                      <span className={cn('mt-0.5', n.tone)}>
+                        <Icon className="h-4.5 w-4.5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-medium text-ink">{n.title}</p>
+                        <p className="text-xs text-ink-tertiary">{n.time}</p>
                       </div>
-                    );
-                  })}
-                </div>
-                <button className="w-full border-t border-border py-2.5 text-[13px] font-medium text-brand transition-colors hover:bg-surface-2">
-                  View all activity
-                </button>
-              </motion.div>
-            </>
+                    </div>
+                  );
+                })}
+              </div>
+              <button className="w-full border-t border-border py-2.5 text-[13px] font-medium text-brand transition-colors hover:bg-surface-2">
+                View all activity
+              </button>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>

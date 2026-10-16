@@ -3061,15 +3061,18 @@ function SummaryTile({
 }) {
   return (
     <Card padding="md" hover>
-      <div className="flex items-center gap-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-surface-3 text-ink-secondary">
+      {/* Stacked until 2xl: beside the icon, a full-precision P&L figure has too
+          little room in a half-width phone tile or a fifth-width laptop one, and
+          runs out of the card. */}
+      <div className="flex flex-col items-start gap-2 2xl:flex-row 2xl:items-center 2xl:gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-surface-3 text-ink-secondary">
           {icon}
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-full">
           <p className="text-xs font-medium text-ink-secondary">{label}</p>
           <p
             className={cn(
-              'value-display text-lg font-semibold',
+              'value-display whitespace-nowrap text-base font-semibold sm:text-lg',
               tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : 'text-ink'
             )}
           >
