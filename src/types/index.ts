@@ -426,7 +426,9 @@ export interface BenchmarkReturns extends WatchlistReturns {
 }
 
 /**
- * The watchlist generated from one client's book (GET /watchlist/client/:id).
+ * The watchlist generated from one client's book (GET /watchlist/client/:id),
+ * or from a household's (GET /watchlist/family/:id), where each symbol is
+ * merged across the members and measured as one holding.
  *
  * Unlike the manual watchlist's calendar price returns, each figure here is the
  * money-weighted return of the CLIENT'S holding over the client's own windows:
@@ -462,9 +464,18 @@ export interface ClientWatchlistRow {
   priceDate: string | null;
   priceStatus: string | null;
   marketValue: number;
+  /** The accounts holding this symbol, largest first; several only for a family. */
+  holders: ClientWatchlistHolder[];
   mtd: PositionWindowReturn;
   qtd: PositionWindowReturn;
   ytd: PositionWindowReturn;
+}
+
+export interface ClientWatchlistHolder {
+  clientId: string;
+  clientName: string;
+  quantity: number;
+  marketValue: number;
 }
 
 export interface ClientWatchlistBenchmark {
@@ -477,8 +488,11 @@ export interface ClientWatchlistBenchmark {
 }
 
 export interface ClientPortfolioWatchlist {
-  clientId: string;
-  clientName: string;
+  kind: 'client' | 'family';
+  id: string;
+  name: string;
+  /** The household's accounts; empty for a client. */
+  members: Array<{ id: string; name: string }>;
   market: Market;
   currency: string;
   asOf: string;

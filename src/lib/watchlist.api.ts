@@ -63,6 +63,17 @@ export const watchlistApi = {
     return res.data;
   },
 
+  /**
+   * The same watchlist for a household: each symbol merged across the members'
+   * accounts and measured as one holding, on the family's own calendar.
+   */
+  async familyPortfolio(familyId: string): Promise<ClientPortfolioWatchlist> {
+    const res = await apiClient
+      .getClient()
+      .get<ClientPortfolioWatchlist>(`/watchlist/family/${encodeURIComponent(familyId)}`);
+    return res.data;
+  },
+
   async folders(market?: Market): Promise<WatchlistFolder[]> {
     const res = await apiClient
       .getClient()
