@@ -18,7 +18,8 @@ export interface LotInput {
 export interface BulkImportRowResult {
   row: number;
   ticker: string | null;
-  status: 'imported' | 'failed';
+  /** 'skipped' is a contract-note trade already on the ledger. */
+  status: 'imported' | 'failed' | 'skipped';
   error?: string;
 }
 
@@ -26,7 +27,56 @@ export interface BulkImportSummary {
   total: number;
   imported: number;
   failed: number;
+  skipped?: number;
   results: BulkImportRowResult[];
+}
+
+/** One trade as read off a contract note, before the user reviews it. */
+export interface ContractNoteTrade {
+  line: number;
+  /** YYYY-MM-DD */
+  tradeDate: string;
+  tradeTime: string | null;
+  securityName: string;
+  isin: string;
+  exchange: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  rate: number;
+  /** Quantity × rate — excludes charges. */
+  total: number;
+  charges: number;
+  reference: string;
+  warnings: string[];
+  /** Resolved from the ISIN; null when neither NSE nor Yahoo knows it. */
+  symbol: string | null;
+}
+
+export interface ContractNotePreview {
+  broker: string;
+  clientCode: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  trades: ContractNoteTrade[];
+  /** Rows that looked like trades but could not be read. */
+  errors: string[];
+  suggestedClientId: string | null;
+}
+
+export interface ContractNoteCommit {
+  clientId: string;
+  includeCharges: boolean;
+  trades: {
+    line: number;
+    date: string;
+    side: 'BUY' | 'SELL';
+    symbol: string;
+    quantity: number;
+    total: number;
+    charges: number;
+    reference: string;
+    isin?: string;
+  }[];
 }
 
 export const holdingsApi = {
@@ -62,6 +112,28 @@ export const holdingsApi = {
       // JSON Content-Type from the axios instance.
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
+    return res.data;
+  },
+
+  /** Reads a broker contract note PDF. Writes nothing. */
+  async previewContractNote(file: File, password?: string): Promise<ContractNotePreview> {
+    const form = new FormData();
+    form.append('file', file);
+    if (password) form.append('password', password);
+
+    const res = await apiClient.getClient().post<ContractNotePreview>(
+      '/holdings/import/contract-note/preview',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return res.data;
+  },
+
+  /** Books the reviewed trades; ones already on the ledger come back 'skipped'. */
+  async commitContractNote(input: ContractNoteCommit): Promise<BulkImportSummary> {
+    const res = await apiClient
+      .getClient()
+      .post<BulkImportSummary>('/holdings/import/contract-note', input);
     return res.data;
   },
 

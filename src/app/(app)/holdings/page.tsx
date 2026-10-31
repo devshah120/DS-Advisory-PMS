@@ -18,6 +18,7 @@ import {
   CalendarDays,
   History,
   FileSpreadsheet,
+  FileText,
   CheckCircle2,
   XCircle,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ import { familiesApi } from '@/lib/families.api';
 import { classificationApi } from '@/lib/classification.api';
 import { SectorAssignCell } from '@/components/holdings/SectorAssignCell';
 import { EditPositionModal } from '@/components/holdings/EditPositionModal';
+import { ContractNoteImportModal } from '@/components/holdings/ContractNoteImportModal';
 import {
   downloadClientHoldingsWorkbook,
   downloadFamilyHoldingsWorkbook,
@@ -455,6 +457,7 @@ export default function HoldingsPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<BulkImportSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [contractNoteOpen, setContractNoteOpen] = useState(false);
 
   // --- delete a position ---
   // Holds the row awaiting confirmation; deleting is irreversible, so it is
@@ -2066,6 +2069,16 @@ export default function HoldingsPage() {
       subtitle: "Consolidated positions across every managed account",
       actions: (
         <div className="flex items-center gap-2">
+                  {/* A contract note is an Indian broker statement, so it is only offered in that book. */}
+                  {market === 'INDIA' && (
+                    <Button
+                      variant="secondary"
+                      leftIcon={<FileText className="h-4 w-4" />}
+                      onClick={() => setContractNoteOpen(true)}
+                    >
+                      Upload Contract Note
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     leftIcon={<Upload className="h-4 w-4" />}
@@ -2879,6 +2892,13 @@ export default function HoldingsPage() {
           </div>
         )}
       </Drawer>
+
+      <ContractNoteImportModal
+        isOpen={contractNoteOpen}
+        onClose={() => setContractNoteOpen(false)}
+        clients={allClients}
+        onImported={loadHoldings}
+      />
 
       {/* Bulk import */}
       <Modal
