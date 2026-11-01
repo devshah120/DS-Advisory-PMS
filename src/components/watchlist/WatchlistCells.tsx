@@ -16,16 +16,18 @@ export function SortableHeader<K extends string>({
   active,
   onSort,
   title,
+  className,
 }: {
   label: string;
   sortKey: K;
   active: { key: K; dir: SortDir } | null;
   onSort: (key: K) => void;
   title?: string;
+  className?: string;
 }) {
   const isActive = active?.key === sortKey;
   return (
-    <th className="px-4 py-3 text-right" title={title}>
+    <th className={cn('px-4 py-3 text-right', className)} title={title}>
       <button
         onClick={() => onSort(sortKey)}
         className={cn(
@@ -45,6 +47,43 @@ export function SortableHeader<K extends string>({
         )}
       </button>
     </th>
+  );
+}
+
+/**
+ * A position's share of the book's return, tinted by sign as the exported
+ * sheet is. Below the two-decimal display precision it reads as 0.00% and
+ * stays unshaded, rather than painting rounding noise green or red.
+ */
+export function ContributionCell({
+  value,
+  title,
+  bold,
+  divider,
+}: {
+  value?: number | null;
+  title?: string;
+  bold?: boolean;
+  /** Rules off the first contribution column from the returns to its left. */
+  divider?: boolean;
+}) {
+  const edge = divider && 'border-l border-border';
+  if (value == null) {
+    return (
+      <td className={cn('px-4 py-3 text-right text-ink-tertiary', edge)} title={title}>
+        —
+      </td>
+    );
+  }
+  const tone =
+    Math.abs(value) < 0.005 ? 'text-ink-secondary' : value > 0 ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger';
+  return (
+    <td
+      className={cn('px-4 py-3 text-right tabular-nums', bold ? 'font-bold' : 'font-semibold', tone, edge)}
+      title={title}
+    >
+      {formatSignedPct(value)}
+    </td>
   );
 }
 

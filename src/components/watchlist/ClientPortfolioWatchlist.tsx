@@ -18,16 +18,28 @@ import {
 } from '@/types';
 import { useMarket } from '@/components/layout/MarketContext';
 import { Card, Button, Select, useToast } from '@/components/ui';
-import { ReturnCell, SortableHeader, type SortDir } from './WatchlistCells';
+import { ContributionCell, ReturnCell, SortableHeader, type SortDir } from './WatchlistCells';
 
 const WINDOWS: ClientWatchlistWindow[] = ['mtd', 'qtd', 'ytd'];
+/** Contribution runs since inception rather than YTD: what the name has done for the book since it was bought. */
+const CONTRIBUTION_WINDOWS: ClientWatchlistWindow[] = ['mtd', 'qtd', 'inception'];
 const COLUMN_LABEL: Record<ClientWatchlistWindow, string> = {
   mtd: 'MTD',
   qtd: 'QTD',
   ytd: 'YTD',
   inception: 'Since inception',
 };
-const COLUMNS = 7;
+const COLUMNS = 4 + WINDOWS.length + CONTRIBUTION_WINDOWS.length;
+
+/** A return column sorts on its return, a `contrib:` column on the position's contribution. */
+type SortKey = ClientWatchlistWindow | `contrib:${ClientWatchlistWindow}`;
+
+/** Contribution below 0.005% reads as 0.00%; the "other" line is hidden while it stays there. */
+const CONTRIBUTION_EPSILON = 0.005;
+
+const CONTRIBUTION_TITLE =
+  'What the position gained or lost over the period as a share of the portfolio: allocation at the start of ' +
+  'the period × its return when nothing was bought or sold. A 10% position that rises 10% contributes +1.00%.';
 
 const fmtDate = (iso: string) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
@@ -65,7 +77,7 @@ export default function ClientPortfolioWatchlist() {
 
   const [data, setData] = useState<Watchlist | null>(null);
   const [loading, setLoading] = useState(false);
-  const [sort, setSort] = useState<{ key: ClientWatchlistWindow; dir: SortDir } | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
   // Only the latest request may land: switching clients mid-load must not let
   // the slower, earlier response paint the previous client's book.
   const requestSeq = useRef(0);
@@ -131,7 +143,7 @@ export default function ClientPortfolioWatchlist() {
   const primary = benchmarks[0];
   const isFamily = data?.kind === 'family';
 
-  const toggleSort = (key: ClientWatchlistWindow) => {
+  const toggleSort = (key: SortKey) => {
     setSort((prev) => {
       if (!prev || prev.key !== key) return { key, dir: 'desc' };
       if (prev.dir === 'desc') return { key, dir: 'asc' };
@@ -141,7 +153,11 @@ export default function ClientPortfolioWatchlist() {
 
   const sortedRows = useMemo(() => {
     if (!sort) return rows;
-    const withValue = rows.map((row) => ({ row, value: row[sort.key].returnPct }));
+    const valueOf = (row: ClientWatchlistRow) =>
+      sort.key.startsWith('contrib:')
+        ? row[sort.key.slice('contrib:'.length) as ClientWatchlistWindow].contributionPct
+        : row[sort.key as ClientWatchlistWindow].returnPct;
+    const withValue = rows.map((row) => ({ row, value: valueOf(row) }));
     withValue.sort((a, b) => {
       if (a.value == null && b.value == null) return 0;
       if (a.value == null) return 1;
@@ -166,6 +182,14 @@ export default function ClientPortfolioWatchlist() {
     const span = `${m.label}: ${fmtDate(m.from)} → ${fmtDate(m.to)}`;
     return m.nominalFrom ? `${span} (from ${fmtDate(m.from)} rather than ${fmtDate(m.nominalFrom)}: performance starts at inception)` : span;
   };
+
+  const contributionHeaderTitle = (w: ClientWatchlistWindow) => {
+    const span = headerTitle(w);
+    return span ? `${CONTRIBUTION_TITLE}\n\n${span}` : CONTRIBUTION_TITLE;
+  };
+
+  const attributions = data ? CONTRIBUTION_WINDOWS.map((w) => data.windows[w].attribution) : [];
+  const showOther = attributions.some((a) => a && Math.abs(a.otherPct) >= CONTRIBUTION_EPSILON);
 
   const anyPartial = rows.some((r) => WINDOWS.some((w) => isPartial(w, r[w])));
   const clampedWindows = data ? WINDOWS.filter((w) => data.windows[w].nominalFrom) : [];
@@ -262,6 +286,17 @@ export default function ClientPortfolioWatchlist() {
                     title={headerTitle(w)}
                   />
                 ))}
+                {CONTRIBUTION_WINDOWS.map((w, i) => (
+                  <SortableHeader
+                    key={`contrib:${w}`}
+                    label={`${COLUMN_LABEL[w]} contrib.`}
+                    sortKey={`contrib:${w}` as SortKey}
+                    active={sort}
+                    onSort={toggleSort}
+                    title={contributionHeaderTitle(w)}
+                    className={i === 0 ? 'border-l border-border' : undefined}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -293,6 +328,43 @@ export default function ClientPortfolioWatchlist() {
             </tbody>
             {data && !loading && (
               <tfoot>
+                {rows.length > 0 && (
+                  <>
+                    {/* What the listed names don't explain, so the column foots to the Portfolio line. */}
+                    {showOther && (
+                      <tr className="border-t border-border">
+                        <td
+                          className="px-4 py-3 italic text-ink-secondary"
+                          colSpan={4 + WINDOWS.length}
+                          title="Positions sold out during the period, and fees or income booked without a symbol"
+                        >
+                          Sold during period &amp; fees
+                        </td>
+                        {attributions.map((a, i) => (
+                          <ContributionCell key={i} value={a?.otherPct} divider={i === 0} />
+                        ))}
+                      </tr>
+                    )}
+                    <tr className="border-t-2 border-border-strong">
+                      <td
+                        className="px-4 py-3 font-bold text-ink"
+                        colSpan={4 + WINDOWS.length}
+                        title="The contributions above add up to this: a flow-adjusted (Modified Dietz) return on capital invested, which can differ slightly from the Performance page's money-weighted figure"
+                      >
+                        Portfolio
+                      </td>
+                      {attributions.map((a, i) => (
+                        <ContributionCell
+                          key={i}
+                          value={a?.totalPct}
+                          bold
+                          divider={i === 0}
+                          title={a ? undefined : 'The book could not be valued at the start of this period'}
+                        />
+                      ))}
+                    </tr>
+                  </>
+                )}
                 {benchmarks.map((b) => (
                   <tr key={b.code} className="border-t border-border bg-surface-2">
                     <td className="px-4 py-3 font-semibold text-ink-secondary" colSpan={4}>
@@ -301,6 +373,8 @@ export default function ClientPortfolioWatchlist() {
                     {WINDOWS.map((w) => (
                       <ReturnCell key={w} value={b[w]} loading={false} plain />
                     ))}
+                    {/* An index contributes nothing to the book. */}
+                    <td className="border-l border-border" colSpan={CONTRIBUTION_WINDOWS.length} />
                   </tr>
                 ))}
               </tfoot>
@@ -325,6 +399,11 @@ export default function ClientPortfolioWatchlist() {
             </p>
           )}
           {anyPartial && <p>† Position opened inside the window. Measured from its first purchase, so not compared to the index.</p>}
+          <p>
+            Contribution is what a position gained or lost over the period as a share of the portfolio: its allocation at
+            the start of the period × its return, when nothing was bought or sold. Capital added during the period widens
+            the base rather than counting as return, and the column adds up to the Portfolio line.
+          </p>
           {clampedWindows.map((w) => (
             <p key={w}>
               {COLUMN_LABEL[w]} ({data.windows[w].label}) is measured from {fmtDate(data.windows[w].from)}, the start of
@@ -401,6 +480,14 @@ function HoldingRow({
           benchmark={primary?.[w]}
           partial={isPartial(w, row[w])}
           title={cellTitle(w, row[w])}
+        />
+      ))}
+      {CONTRIBUTION_WINDOWS.map((w, i) => (
+        <ContributionCell
+          key={w}
+          value={row[w].contributionPct}
+          divider={i === 0}
+          title={row[w].contributionPct == null ? cellTitle(w, row[w]) : undefined}
         />
       ))}
     </tr>
