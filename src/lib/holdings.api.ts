@@ -18,7 +18,7 @@ export interface LotInput {
 export interface BulkImportRowResult {
   row: number;
   ticker: string | null;
-  /** 'skipped' is a contract-note trade already on the ledger. */
+  /** 'skipped' is a trade already on the ledger (contract note or Excel re-upload). */
   status: 'imported' | 'failed' | 'skipped';
   error?: string;
 }

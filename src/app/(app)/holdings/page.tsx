@@ -21,6 +21,7 @@ import {
   FileText,
   CheckCircle2,
   XCircle,
+  MinusCircle,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { clientsApi } from '@/lib/clients.api';
@@ -609,10 +610,20 @@ export default function HoldingsPage() {
       }
 
       setImportResult(summary);
+      // The file has been booked; leaving it selected kept Import live, and a
+      // second click booked every trade again.
+      setImportFile(null);
       await loadHoldings();
 
+      const skipped = summary.skipped ?? 0;
       if (summary.failed === 0) {
-        toast({ tone: 'success', title: 'Import complete', description: `${summary.imported} position${summary.imported === 1 ? '' : 's'} imported` });
+        toast({
+          tone: 'success',
+          title: 'Import complete',
+          description:
+            `${summary.imported} trade${summary.imported === 1 ? '' : 's'} imported` +
+            (skipped ? ` · ${skipped} already on the ledger` : ''),
+        });
       } else {
         toast({
           tone: summary.imported > 0 ? 'warning' : 'error',
@@ -2971,9 +2982,10 @@ export default function HoldingsPage() {
           {/* Result summary */}
           {importResult && !(importResult as any).mock && (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <ResultTile label="Total rows" value={importResult.total} />
                 <ResultTile label="Imported" value={importResult.imported} tone="success" />
+                <ResultTile label="Already on ledger" value={importResult.skipped ?? 0} />
                 <ResultTile label="Failed" value={importResult.failed} tone={importResult.failed ? 'danger' : undefined} />
               </div>
 
@@ -2996,6 +3008,10 @@ export default function HoldingsPage() {
                             {r.status === 'imported' ? (
                               <span className="inline-flex items-center gap-1 text-success">
                                 <CheckCircle2 className="h-3.5 w-3.5" /> Imported
+                              </span>
+                            ) : r.status === 'skipped' ? (
+                              <span className="inline-flex items-center gap-1 text-ink-secondary">
+                                <MinusCircle className="h-3.5 w-3.5" /> {r.error ?? 'Skipped'}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-danger">
