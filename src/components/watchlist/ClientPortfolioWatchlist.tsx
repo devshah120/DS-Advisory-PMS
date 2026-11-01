@@ -7,6 +7,7 @@ import { clientsApi } from '@/lib/clients.api';
 import { familiesApi } from '@/lib/families.api';
 import { formatCurrency } from '@/lib/utils';
 import { displayTicker } from '@/lib/market-scope';
+import { downloadWatchlistWorkbook } from '@/lib/watchlistExport';
 import {
   Client,
   Family,
@@ -20,7 +21,12 @@ import { Card, Button, Select, useToast } from '@/components/ui';
 import { ReturnCell, SortableHeader, type SortDir } from './WatchlistCells';
 
 const WINDOWS: ClientWatchlistWindow[] = ['mtd', 'qtd', 'ytd'];
-const COLUMN_LABEL: Record<ClientWatchlistWindow, string> = { mtd: 'MTD', qtd: 'QTD', ytd: 'YTD' };
+const COLUMN_LABEL: Record<ClientWatchlistWindow, string> = {
+  mtd: 'MTD',
+  qtd: 'QTD',
+  ytd: 'YTD',
+  inception: 'Since inception',
+};
 const COLUMNS = 7;
 
 const fmtDate = (iso: string) =>
@@ -164,46 +170,14 @@ export default function ClientPortfolioWatchlist() {
   const anyPartial = rows.some((r) => WINDOWS.some((w) => isPartial(w, r[w])));
   const clampedWindows = data ? WINDOWS.filter((w) => data.windows[w].nominalFrom) : [];
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!data) return;
-    // A household's sheet also says which accounts each row was merged from.
-    const header = [
-      'Symbol',
-      'Company',
-      ...(isFamily ? ['Held in'] : []),
-      'Sector',
-      'Industry',
-      'Price',
-      'MTD %',
-      'QTD %',
-      'YTD %',
-    ];
-    const body = sortedRows.map((r) => [
-      displayTicker(r.symbol),
-      r.company ?? '',
-      ...(isFamily ? [r.holders.map((h) => `${h.clientName} (${h.quantity})`).join('; ')] : []),
-      r.sector,
-      r.industry,
-      r.price,
-      r.mtd.returnPct ?? '',
-      r.qtd.returnPct ?? '',
-      r.ytd.returnPct ?? '',
-    ]);
-    const blanks: string[] = Array(header.length - 4).fill('');
-    const benchmarkRows = benchmarks.map((b) => [b.label, ...blanks, b.mtd ?? '', b.qtd ?? '', b.ytd ?? '']);
-    const windowRows = WINDOWS.map((w) => [
-      `${COLUMN_LABEL[w]} window`,
-      `${data.windows[w].from} → ${data.windows[w].to}`,
-    ]);
-    const csv = [header, ...body, [], ...benchmarkRows, [], ...windowRows]
-      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${data.name.replace(/\s+/g, '_').toLowerCase()}_watchlist_${data.asOf}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    try {
+      // Rows go out in the order on screen, so an export keeps the chosen sort.
+      await downloadWatchlistWorkbook(data, sortedRows);
+    } catch {
+      toast({ tone: 'error', title: 'Could not build the workbook' });
+    }
   };
 
   return (
@@ -385,7 +359,7 @@ function HoldingRow({
   currency: string;
   /** On a household: which member accounts the row was merged from. */
   showHolders: boolean;
-  primary?: { mtd: number | null; qtd: number | null; ytd: number | null };
+  primary?: Record<ClientWatchlistWindow, number | null>;
   isPartial: (w: ClientWatchlistWindow, r: PositionWindowReturn) => boolean;
   cellTitle: (w: ClientWatchlistWindow, r: PositionWindowReturn) => string | undefined;
 }) {

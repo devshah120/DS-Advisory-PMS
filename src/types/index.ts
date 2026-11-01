@@ -434,13 +434,17 @@ export interface BenchmarkReturns extends WatchlistReturns {
  * money-weighted return of the CLIENT'S holding over the client's own windows:
  * fiscal on the Indian book, clamped to the 30-June-2026 inception. Percent.
  */
-export type ClientWatchlistWindow = 'mtd' | 'qtd' | 'ytd';
+export type ClientWatchlistWindow = 'mtd' | 'qtd' | 'ytd' | 'inception';
 
 export interface PositionWindowReturn {
   returnPct: number | null;
   openingValue: number;
   closingValue: number;
   netFlows: number;
+  /** Money made or lost over the window, net of capital moved in or out. */
+  gain: number | null;
+  /** Share of the book's return over the window, in percent of its capital. */
+  contributionPct: number | null;
   /** Later than the window's `from` when the position was opened inside it. */
   measuredFrom: string;
   reason?: string;
@@ -452,6 +456,19 @@ export interface ClientWatchlistWindowMeta {
   to: string;
   clampedToInception: boolean;
   nominalFrom: string | null;
+  /** Null when the book could not be valued at the window's open. */
+  attribution: ClientWatchlistAttribution | null;
+}
+
+/**
+ * The book's return over a window and the part of it the listed positions do
+ * not explain (names sold inside the window, fees), both in percent. The rows'
+ * contributions plus `otherPct` add up to `totalPct`.
+ */
+export interface ClientWatchlistAttribution {
+  capitalBase: number;
+  totalPct: number;
+  otherPct: number;
 }
 
 export interface ClientWatchlistRow {
@@ -469,6 +486,7 @@ export interface ClientWatchlistRow {
   mtd: PositionWindowReturn;
   qtd: PositionWindowReturn;
   ytd: PositionWindowReturn;
+  inception: PositionWindowReturn;
 }
 
 export interface ClientWatchlistHolder {
@@ -485,6 +503,7 @@ export interface ClientWatchlistBenchmark {
   mtd: number | null;
   qtd: number | null;
   ytd: number | null;
+  inception: number | null;
 }
 
 export interface ClientPortfolioWatchlist {
