@@ -69,7 +69,9 @@ export const MARKET_META: Record<Market, MarketMeta> = {
 export const ALL_MARKETS: Market[] = ['US', 'INDIA'];
 
 /**
- * Benchmarks offerable per book, mirroring `MARKETS[market].indices` on the API.
+ * Benchmarks offerable per book, mirroring `benchmarksFor(market)` on the API
+ * (the strip's indices plus the book's extra benchmarks). The server rejects a
+ * code outside the mandate's book, so this list and that one must agree.
  *
  * The client form used to take the benchmark as free text, which is how rows
  * reading "qaa" and "aaaaaaaaaaaa" reached the database. That column cannot be
@@ -90,9 +92,13 @@ export const MARKET_BENCHMARKS: Record<Market, ReadonlyArray<{ code: string; lab
   ],
   INDIA: [
     { code: 'NIFTY50', label: 'Nifty 50' },
+    { code: 'NIFTY500', label: 'Nifty 500' },
     { code: 'SENSEX', label: 'Sensex' },
     { code: 'BANKNIFTY', label: 'Nifty Bank' },
     { code: 'NIFTYMIDCAP', label: 'Nifty Midcap 50' },
+    // The S&P 500 converted to rupees day by day (^GSPC × USDINR), so a rupee
+    // portfolio with US exposure is compared like for like.
+    { code: 'SP500_INR', label: 'S&P 500 (in INR)' },
   ],
 };
 

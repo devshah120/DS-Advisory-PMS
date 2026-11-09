@@ -335,7 +335,8 @@ export default function ClientForm({
             hand could only ever produce an unusable value — which is exactly
             what happened to the Indian mandates onboarded so far.
             Options follow the selected book: an Indian mandate is offered the
-            Nifty/Sensex, not the S&P.
+            Nifty/Sensex/Nifty 500, and the S&P 500 only as a rupee series —
+            never the US book's dollar index.
           */}
           <Select
             label="Benchmark"
