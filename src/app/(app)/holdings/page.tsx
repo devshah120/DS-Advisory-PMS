@@ -307,6 +307,7 @@ function asOfExportRows(statement: HoldingsAsOf, withAccounts: boolean): Holding
   return statement.positions.map((p, i) => ({
     srNo: i + 1,
     symbol: p.displayTicker,
+    ticker: p.ticker,
     name: p.company,
     sector: p.sector || 'Uncategorized',
     quantity: p.quantity,
@@ -765,6 +766,7 @@ export default function HoldingsPage() {
     const exportRows: HoldingsExportRow[] = rows.map((p, i) => ({
       srNo: i + 1,
       symbol: p.displayTicker,
+      ticker: p.ticker,
       name: p.company,
       sector: p.sector || 'Uncategorized',
       quantity: p.quantity,

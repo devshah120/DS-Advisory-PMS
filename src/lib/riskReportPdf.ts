@@ -47,6 +47,8 @@ import {
 /** One position, as the risk report reads it. */
 export interface RiskPosition {
   symbol: string;
+  /** Full Yahoo symbol when `symbol` is the suffix-stripped display form. */
+  ticker?: string;
   name: string;
   sector: string;
   quantity: number;

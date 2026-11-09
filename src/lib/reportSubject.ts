@@ -183,6 +183,7 @@ async function loadFamilySubject(familyId: string): Promise<SubjectData> {
   const positions: RiskPosition[] = openOnly(agg.positions ?? [])
     .map((p) => ({
       symbol: p.displayTicker || p.ticker,
+      ticker: p.ticker,
       name: p.company,
       sector: p.sector || 'Unclassified',
       quantity: p.quantity,

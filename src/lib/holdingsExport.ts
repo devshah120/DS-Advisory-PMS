@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { marketApi, type MarketCapQuote } from './market.api';
 
 /**
  * One position as it appears in a client's holdings export. Mirrors the
@@ -8,6 +9,13 @@ import ExcelJS from 'exceljs';
 export interface HoldingsExportRow {
   srNo: number;
   symbol: string;
+  /**
+   * The fully-qualified Yahoo symbol ('RELIANCE.NS', 'AIMTRON-SM.NS'), used to
+   * look up market cap for the size-band table. Needed wherever `symbol` is the
+   * suffix-stripped display form, which on its own can't be priced. Falls back
+   * to `symbol` when absent.
+   */
+  ticker?: string;
   name: string;
   /** Drives the sector allocation block; already defaulted to 'Uncategorized'. */
   sector: string;
@@ -119,6 +127,105 @@ function buildSectorSlices(rows: HoldingsExportRow[], cashBalance: number): Sect
   return slices;
 }
 
+/** One crore, in rupees. */
+const CRORE = 10_000_000;
+/** The firm's size bands, in INR crore: small up to 5,000; mid 5,001–50,000; large above. */
+const SMALL_CAP_MAX_CR = 5_000;
+const MID_CAP_MAX_CR = 50_000;
+
+/**
+ * Band colours: one blue, deepest for large, because the bands are ordered —
+ * unlike sectors, which take unrelated hues. Kept light enough that the black
+ * label text stays readable on the darkest of them, on screen and in print.
+ */
+const CAP_BANDS = [
+  { label: 'Large Cap', color: '5B9BD5' },
+  { label: 'Mid Cap', color: '9DC3E6' },
+  { label: 'Small Cap', color: 'DEEBF7' },
+] as const;
+const FUND_SLICE = { label: 'ETFs & Funds', color: 'CCB974' };
+const UNCLASSIFIED_SLICE = { label: 'Unclassified', color: '8C8C8C' };
+
+/** ETF units carry no market cap, and Yahoo types Indian ETFs as EQUITY — the name is the tell. */
+const FUND_NAME = /\b(ETF|BEES|FUND)\b/i;
+const FUND_QUOTE_TYPES = new Set(['ETF', 'MUTUALFUND']);
+
+type CapBucket = (typeof CAP_BANDS)[number]['label'] | 'ETFs & Funds' | 'Unclassified';
+
+/**
+ * Which band a position falls in. The bands meet at whole crores (5,000 is the
+ * top of small, 5,001 the bottom of mid), so the cut is "at most" each ceiling
+ * — a cap of 5,000.4 cr reads as mid rather than falling between the bands.
+ */
+function capBucketOf(row: HoldingsExportRow, quote: MarketCapQuote | undefined): CapBucket {
+  if (FUND_NAME.test(row.name) || (quote?.quoteType && FUND_QUOTE_TYPES.has(quote.quoteType))) {
+    return 'ETFs & Funds';
+  }
+  const crore = quote?.marketCapInr != null ? quote.marketCapInr / CRORE : null;
+  if (crore == null) return 'Unclassified';
+  if (crore <= SMALL_CAP_MAX_CR) return 'Small Cap';
+  if (crore <= MID_CAP_MAX_CR) return 'Mid Cap';
+  return 'Large Cap';
+}
+
+/** The key a row's market cap is filed under — the full Yahoo symbol, upper-cased. */
+function capKey(row: HoldingsExportRow): string {
+  return (row.ticker || row.symbol).trim().toUpperCase();
+}
+
+/**
+ * Rolls positions into the size bands, against the same cash-inclusive
+ * portfolio value the sector table uses so the two tables foot to the same
+ * total. The three bands always print, even at 0% — "no small caps" is an
+ * answer the reader is looking for. ETFs, unclassified names and cash print
+ * only when present.
+ */
+function buildMarketCapSlices(
+  rows: HoldingsExportRow[],
+  cashBalance: number,
+  caps: Record<string, MarketCapQuote>
+): SectorSlice[] {
+  const portfolioValue = rows.reduce((s, r) => s + r.currentValue, 0) + cashBalance;
+  if (portfolioValue <= 0) return [];
+
+  const totals = new Map<CapBucket, number>();
+  for (const row of rows) {
+    const bucket = capBucketOf(row, caps[capKey(row)]);
+    totals.set(bucket, (totals.get(bucket) ?? 0) + row.currentValue);
+  }
+
+  const slice = (label: string, value: number, color: string): SectorSlice => ({
+    label,
+    value,
+    weight: value / portfolioValue,
+    color,
+  });
+
+  const slices = CAP_BANDS.map((b) => slice(b.label, totals.get(b.label) ?? 0, b.color));
+  for (const extra of [FUND_SLICE, UNCLASSIFIED_SLICE]) {
+    const value = totals.get(extra.label as CapBucket) ?? 0;
+    if (value > 0) slices.push(slice(extra.label, value, extra.color));
+  }
+  if (cashBalance > 0) slices.push(slice('Cash', cashBalance, CASH_SLICE_COLOR));
+  return slices;
+}
+
+/** The lines printed under the size-band table: the band definitions, then any caveat. */
+function marketCapFootnotes(
+  rows: HoldingsExportRow[],
+  caps: Record<string, MarketCapQuote>,
+  asOf?: string
+): string[] {
+  const notes = ['Small cap: up to 5,000 cr; Mid cap: 5,001-50,000 cr; Large cap: above 50,000 cr.'];
+  // Yahoo has only today's market cap. Price moves since a past statement date
+  // can carry a name across a band edge, so a dated statement says which it used.
+  if (asOf) notes.push(`Bands use current market capitalisation, not as of ${formatStatementDate(asOf)}.`);
+  if (rows.some((r) => { const c = caps[capKey(r)]?.currency; return !!c && c !== 'INR'; })) {
+    notes.push('Non-INR market caps converted to INR at the current exchange rate.');
+  }
+  return notes;
+}
+
 interface ColumnSpec {
   header: string;
   width: number;
@@ -201,6 +308,12 @@ export interface StatementOptions {
    * than printing them as though they were market prices.
    */
   notes?: string[];
+  /**
+   * Market caps keyed by full Yahoo symbol (see `HoldingsExportRow.ticker`).
+   * When present, a small/mid/large-cap table prints beside the sector table;
+   * when absent it is left out rather than printed as all-unclassified.
+   */
+  marketCaps?: Record<string, MarketCapQuote>;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -297,7 +410,24 @@ export function buildClientHoldingsWorkbook(
     ...(options.asOf ? [`Positions and closing prices as of ${formatStatementDate(options.asOf)}.`] : []),
     ...(options.notes ?? []),
   ]);
-  addSectorAllocationBlock(sheet, buildSectorSlices(rows, cashBalance));
+
+  // The two allocation tables share their top row, side by side, one blank
+  // row below the positions so that table stays a clean range of its own.
+  const blocksTop = sheet.rowCount + 2;
+  writeAllocationTable(sheet, blocksTop, SECTOR_FIRST_COL, {
+    title: 'Sector Allocation',
+    labelHeader: 'Sector',
+    slices: buildSectorSlices(rows, cashBalance),
+  });
+  if (options.marketCaps) {
+    writeAllocationTable(sheet, blocksTop, MARKET_CAP_FIRST_COL, {
+      title: 'Market Cap Allocation',
+      labelHeader: 'Market Cap',
+      slices: buildMarketCapSlices(rows, cashBalance, options.marketCaps),
+      footnotes: marketCapFootnotes(rows, options.marketCaps, options.asOf),
+      minWidths: [14, 13, 15],
+    });
+  }
 
   return wb;
 }
@@ -455,78 +585,117 @@ function addStatementNotes(sheet: ExcelJS.Worksheet, notes: string[]): void {
 }
 
 /**
- * The sector allocation block: a heading and a table of sectors with values and
- * weights. Deliberately table-only — a pie beside it repeated the same numbers.
- * Written below the TOTAL with a blank spacer row, so the positions table above
- * stays a clean rectangular range that still sorts and filters on its own.
+ * The allocation tables below the TOTAL. Deliberately table-only — a pie
+ * beside them repeated the same numbers.
  *
- * Indented to start at column C rather than A: the narrow 'Sr No' and 'Symbol'
- * widths above clipped the sector names, whereas column C carries the wide
- * 'Name' width and gives every label room to read in full.
+ * The sector table starts at column C rather than A: the narrow 'Sr No' and
+ * 'Symbol' widths above clipped the sector names, whereas column C carries the
+ * wide 'Name' width and gives every label room to read in full. The market-cap
+ * table sits to its right after one blank column, on the same rows, so both
+ * read as one panel.
  */
 const SECTOR_FIRST_COL = 3;
-const SECTOR_LAST_COL = SECTOR_FIRST_COL + 2;
+const MARKET_CAP_FIRST_COL = SECTOR_FIRST_COL + 4;
 
-function addSectorAllocationBlock(sheet: ExcelJS.Worksheet, slices: SectorSlice[]): void {
+interface AllocationTable {
+  title: string;
+  /** Header over the label column ('Sector', 'Market Cap'). */
+  labelHeader: string;
+  slices: SectorSlice[];
+  /** Italic lines under the table's TOTAL. */
+  footnotes?: string[];
+  /**
+   * Minimum widths for the label, value and weight columns. The table borrows
+   * columns sized for the positions above; where those are narrower than its
+   * own headers, they are widened rather than letting '% of Portfolio' clip.
+   */
+  minWidths?: [number, number, number];
+}
+
+/**
+ * Writes one allocation table — heading, column headers, a row per slice with
+ * a colour swatch on its label, and a ruled TOTAL — with its top-left corner at
+ * (`topRow`, `firstCol`). Written cell by cell rather than appended, so two
+ * tables can share the same rows.
+ */
+function writeAllocationTable(
+  sheet: ExcelJS.Worksheet,
+  topRow: number,
+  firstCol: number,
+  table: AllocationTable
+): void {
+  const { slices } = table;
   if (slices.length === 0) return;
 
-  /** Places values at SECTOR_FIRST_COL, leaving the columns to their left blank. */
-  const indented = (cells: Array<string | number>) => [
-    ...Array(SECTOR_FIRST_COL - 1).fill(null),
-    ...cells,
-  ];
-  /** True for the label column, which stays left-aligned while the figures don't. */
-  const isLabelCol = (col: number) => col === SECTOR_FIRST_COL;
-  const inBlock = (col: number) => col >= SECTOR_FIRST_COL && col <= SECTOR_LAST_COL;
+  const [labelCol, valueCol, weightCol] = [firstCol, firstCol + 1, firstCol + 2];
 
-  sheet.addRow([]);
-  const headingRow = sheet.addRow(indented(['Sector Allocation']));
-  const headingCell = headingRow.getCell(SECTOR_FIRST_COL);
+  if (table.minWidths) {
+    table.minWidths.forEach((min, i) => {
+      const column = sheet.getColumn(firstCol + i);
+      column.width = Math.max(column.width ?? 0, min);
+    });
+  }
+
+  /** Writes [label, value, weight] across the table's three columns on `rowNumber`. */
+  const writeRow = (
+    rowNumber: number,
+    values: [string, number | string, number | string],
+    style: { bold?: boolean; header?: boolean; totalRule?: boolean }
+  ) => {
+    const row = sheet.getRow(rowNumber);
+    values.forEach((value, i) => {
+      const col = firstCol + i;
+      const cell = row.getCell(col);
+      cell.value = value;
+      cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: !!style.bold };
+      cell.border = style.totalRule
+        ? { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } }
+        : THIN_BORDER;
+      cell.alignment = {
+        horizontal: col === labelCol ? 'left' : style.header ? 'center' : 'right',
+        vertical: 'middle',
+      };
+      if (!style.header && col === valueCol) cell.numFmt = WHOLE_NUMBER;
+      if (!style.header && col === weightCol) cell.numFmt = WHOLE_PERCENT;
+    });
+    return row;
+  };
+
+  const headingRow = sheet.getRow(topRow);
+  const headingCell = headingRow.getCell(labelCol);
+  headingCell.value = table.title;
   headingCell.font = { name: FONT_NAME, size: HEADING_SIZE, bold: true };
   headingRow.height = 20;
 
-  const header = sheet.addRow(indented(['Sector', 'Value', '% of Portfolio']));
-  header.eachCell((cell, col) => {
-    if (!inBlock(col)) return;
-    cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
-    cell.border = THIN_BORDER;
-    cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'center', vertical: 'middle' };
-  });
+  writeRow(topRow + 1, [table.labelHeader, 'Value', '% of Portfolio'], { bold: true, header: true });
 
-  for (const slice of slices) {
-    const row = sheet.addRow(indented([slice.label, slice.value, slice.weight]));
-    row.eachCell((cell, col) => {
-      if (!inBlock(col)) return;
-      cell.font = { name: FONT_NAME, size: BODY_SIZE };
-      cell.border = THIN_BORDER;
-      cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'right', vertical: 'middle' };
-      if (col === SECTOR_FIRST_COL + 1) cell.numFmt = WHOLE_NUMBER;
-      if (col === SECTOR_LAST_COL) cell.numFmt = WHOLE_PERCENT;
-    });
-    // A colour swatch on the label cell so each sector reads at a glance.
-    row.getCell(SECTOR_FIRST_COL).fill = {
+  slices.forEach((slice, i) => {
+    const row = writeRow(topRow + 2 + i, [slice.label, slice.value, slice.weight], {});
+    // A colour swatch on the label cell so each slice reads at a glance.
+    row.getCell(labelCol).fill = {
       type: 'pattern',
       pattern: 'solid',
       fgColor: { argb: `FF${slice.color}` },
     };
-  }
+  });
 
-  const totalRow = sheet.addRow(
-    indented([
+  const totalRowNumber = topRow + 2 + slices.length;
+  writeRow(
+    totalRowNumber,
+    [
       'TOTAL',
       slices.reduce((s, x) => s + x.value, 0),
       slices.reduce((s, x) => s + x.weight, 0),
-    ])
+    ],
+    { bold: true, totalRule: true }
   );
-  totalRow.eachCell((cell, col) => {
-    if (!inBlock(col)) return;
-    cell.font = { name: FONT_NAME, size: BODY_SIZE, bold: true };
-    cell.alignment = { horizontal: isLabelCol(col) ? 'left' : 'right', vertical: 'middle' };
-    cell.border = { ...THIN_BORDER, top: { style: 'medium', color: { argb: 'FF000000' } } };
-    if (col === SECTOR_FIRST_COL + 1) cell.numFmt = WHOLE_NUMBER;
-    if (col === SECTOR_LAST_COL) cell.numFmt = WHOLE_PERCENT;
-  });
 
+  (table.footnotes ?? []).forEach((note, i) => {
+    const cell = sheet.getRow(totalRowNumber + 1 + i).getCell(labelCol);
+    cell.value = note;
+    cell.font = { name: FONT_NAME, size: BODY_SIZE - 1, italic: true };
+    cell.alignment = { horizontal: 'left', vertical: 'middle' };
+  });
 }
 
 /** Builds the workbook and hands it to the browser as an .xlsx download. */
@@ -536,14 +705,36 @@ export async function downloadClientHoldingsWorkbook(
   cashBalance = 0,
   options: StatementOptions = {}
 ): Promise<void> {
-  const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance, 'client', options);
+  const withCaps = await withMarketCaps(rows, options);
+  const wb = buildClientHoldingsWorkbook(clientName, rows, cashBalance, 'client', withCaps);
   await saveWorkbook(wb, `${slugify(clientName)}-holdings${asOfSuffix(options)}.xlsx`);
+}
+
+/**
+ * `options` with market caps for every row filled in, unless the caller
+ * already supplied them. A failed lookup leaves them out and the workbook
+ * drops the size-band table: the holdings are what the advisor came for, and
+ * an outage at the quote source shouldn't block the export — nor should it
+ * print a table claiming the whole book is unclassified.
+ */
+async function withMarketCaps(
+  rows: HoldingsExportRow[],
+  options: StatementOptions
+): Promise<StatementOptions> {
+  if (options.marketCaps || rows.length === 0) return options;
+  try {
+    const marketCaps = await marketApi.marketCaps([...new Set(rows.map(capKey))]);
+    return { ...options, marketCaps };
+  } catch (err) {
+    console.warn('Market caps unavailable; exporting without the market-cap table', err);
+    return options;
+  }
 }
 
 /**
  * The merged household portfolio in the firm's reference format — the same
  * sheet an individual client gets (borders, Perpetua, whole numbers, the %PL
- * gain/loss tints, the allocation gradient and the sector allocation table),
+ * gain/loss tints, the allocation gradient and the sector and market-cap tables),
  * plus an "Accounts" column showing how many of the household's
  * mandates hold each name.
  *
@@ -556,7 +747,8 @@ export async function downloadFamilyHoldingsWorkbook(
   cashBalance = 0,
   options: StatementOptions = {}
 ): Promise<void> {
-  const wb = buildClientHoldingsWorkbook(familyName, rows, cashBalance, 'family', options);
+  const withCaps = await withMarketCaps(rows, options);
+  const wb = buildClientHoldingsWorkbook(familyName, rows, cashBalance, 'family', withCaps);
   await saveWorkbook(wb, `${slugify(familyName)}-family-holdings${asOfSuffix(options)}.xlsx`);
 }
 

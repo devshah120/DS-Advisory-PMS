@@ -394,6 +394,7 @@ export function ReportGeneratorModal({
         const rows: HoldingsExportRow[] = analysis.positions.map((p, i) => ({
           srNo: i + 1,
           symbol: p.symbol,
+          ticker: p.ticker,
           name: p.name,
           sector: p.sector,
           quantity: p.quantity,

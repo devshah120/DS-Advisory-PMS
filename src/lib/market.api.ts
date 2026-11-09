@@ -19,6 +19,16 @@ export interface SymbolLookup {
   source: 'yahoo' | 'fallback';
 }
 
+/** One symbol's market capitalisation, as /market/market-caps reports it. */
+export interface MarketCapQuote {
+  /** In INR, converted from the listing currency where needed; null for ETFs, funds and unknowns. */
+  marketCapInr: number | null;
+  /** The currency the cap was reported in before conversion; null with no cap. */
+  currency: string | null;
+  /** Yahoo's quoteType for the held symbol ('EQUITY', 'ETF', …). */
+  quoteType: string | null;
+}
+
 export class SymbolNotFoundError extends Error {
   constructor(ticker: string) {
     super(`No symbol found for "${ticker}"`);
@@ -46,5 +56,20 @@ export const marketApi = {
       if (err?.response?.status === 404) throw new SymbolNotFoundError(ticker);
       throw err;
     }
+  },
+
+  /**
+   * Market caps for fully-qualified Yahoo symbols, keyed by the upper-cased
+   * symbol. Every requested symbol has an entry; throws when the server
+   * couldn't reach the data source at all.
+   */
+  async marketCaps(symbols: string[]): Promise<Record<string, MarketCapQuote>> {
+    if (symbols.length === 0) return {};
+    const res = await apiClient
+      .getClient()
+      .get<Record<string, MarketCapQuote>>('/market/market-caps', {
+        params: { symbols: symbols.join(',') },
+      });
+    return res.data;
   },
 };
