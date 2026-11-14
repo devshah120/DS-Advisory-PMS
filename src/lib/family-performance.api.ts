@@ -70,6 +70,8 @@ export interface FamilyPeriodReturn {
     reason?: string;
   } | null;
   alpha: number | null;
+  /** The household's own index; differs from `benchmark.code` while comparing. */
+  assignedBenchmarkCode: string | null;
 
   memberCount: number;
   members: FamilyMemberPerformance[];
@@ -91,20 +93,30 @@ export const familyPerformanceApi = {
     return res.data;
   },
 
-  async periodReturn(familyId: string, period: PerformancePeriod): Promise<FamilyPeriodReturn> {
+  /** `benchmark` compares against another index in the family's book; nothing is saved. */
+  async periodReturn(
+    familyId: string,
+    period: PerformancePeriod,
+    benchmark?: string,
+  ): Promise<FamilyPeriodReturn> {
     const res = await apiClient
       .getClient()
       .get<FamilyPeriodReturn>(`/families/${familyId}/performance/return`, {
-        params: { period },
+        params: { period, ...(benchmark ? { benchmark } : {}) },
       });
     return res.data;
   },
 
-  async customReturn(familyId: string, from: Date, to: Date): Promise<FamilyPeriodReturn> {
+  async customReturn(
+    familyId: string,
+    from: Date,
+    to: Date,
+    benchmark?: string,
+  ): Promise<FamilyPeriodReturn> {
     const res = await apiClient
       .getClient()
       .get<FamilyPeriodReturn>(`/families/${familyId}/performance/return`, {
-        params: { from: iso(from), to: iso(to) },
+        params: { from: iso(from), to: iso(to), ...(benchmark ? { benchmark } : {}) },
       });
     return res.data;
   },

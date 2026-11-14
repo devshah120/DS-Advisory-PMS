@@ -8,8 +8,10 @@ import {
 } from '@/lib/family-performance.api';
 import { PeriodOption } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
-import { useCurrency } from '@/components/layout/MarketContext';
-import { Badge, Card, CardHeader, Input, Select, Skeleton } from '@/components/ui';
+import { useCurrency, useMarket } from '@/components/layout/MarketContext';
+import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
+import { MARKET_BENCHMARKS } from '@/lib/market-scope';
+import { clientsApi } from '@/lib/clients.api';
 import {
   DEFAULT_INCEPTION_ISO,
   isUsableRange,
@@ -75,6 +77,45 @@ export function FamilyPerformance({
   const [periodReturn, setPeriodReturn] = useState<FamilyPeriodReturn | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  /**
+   * Which index to measure the household against. Null = its own (the
+   * members' shared benchmark, else the book default). Keyed by family so
+   * switching household drops the comparison in the same render.
+   */
+  const { toast } = useToast();
+  const { market } = useMarket();
+  const benchmarkOptions = MARKET_BENCHMARKS[market];
+  const [compare, setCompare] = useState<{ familyId: string; code: string } | null>(null);
+  const compareCode = compare?.familyId === familyId ? compare.code : null;
+  const [savingDefault, setSavingDefault] = useState(false);
+  const assignedCode = periodReturn?.assignedBenchmarkCode ?? null;
+  const benchmarkLabel = (code: string | null | undefined) =>
+    benchmarkOptions.find((b) => b.code === code)?.label ?? code ?? 'Benchmark';
+
+  /**
+   * Saves the compared index on every member, so the household and each
+   * member's own sheet, exports and review packs all use it from now on.
+   */
+  async function applyToMembers(code: string, memberIds: string[]) {
+    setSavingDefault(true);
+    const results = await Promise.allSettled(
+      memberIds.map((id) => clientsApi.update(id, { benchmark: code })),
+    );
+    const failed = results.filter((x) => x.status === 'rejected').length;
+    toast(
+      failed
+        ? {
+            tone: 'error',
+            title: `${benchmarkLabel(code)} saved on ${memberIds.length - failed} of ${memberIds.length} members — ${failed} failed`,
+          }
+        : { tone: 'success', title: `${benchmarkLabel(code)} is now the benchmark for all ${memberIds.length} members` },
+    );
+    if (!failed) setCompare(null);
+    setReloadTick((t) => t + 1);
+    setSavingDefault(false);
+  }
 
   /**
    * The floor for the date picker: this client's own inception, as reported by
@@ -129,8 +170,9 @@ export function FamilyPerformance({
                 familyId,
                 new Date(customFrom),
                 new Date(customTo),
+                compareCode ?? undefined,
               )
-            : await familyPerformanceApi.periodReturn(familyId, period);
+            : await familyPerformanceApi.periodReturn(familyId, period, compareCode ?? undefined);
         if (cancelled) return;
         setPeriodReturn(pr);
       } catch (e: any) {
@@ -148,7 +190,7 @@ export function FamilyPerformance({
     return () => {
       cancelled = true;
     };
-  }, [familyId, period, customFrom, customTo, refreshSignal]);
+  }, [familyId, period, customFrom, customTo, compareCode, reloadTick, refreshSignal]);
 
   useEffect(() => {
     onStateChange?.({ periodReturn, loading });
@@ -185,6 +227,22 @@ export function FamilyPerformance({
             </optgroup>
           ))
         )}
+      </Select>
+      <Select
+        aria-label="Compare against"
+        value={compareCode ?? assignedCode ?? ''}
+        onChange={(e) => {
+          const code = e.target.value;
+          setCompare(!code || code === assignedCode ? null : { familyId, code });
+        }}
+      >
+        {!assignedCode && !compareCode && <option value="">Household benchmark</option>}
+        {benchmarkOptions.map((b) => (
+          <option key={b.code} value={b.code}>
+            vs {b.label}
+            {b.code === assignedCode ? ' (household default)' : ''}
+          </option>
+        ))}
       </Select>
       {period === 'CUSTOM' && (
         <>
@@ -274,7 +332,7 @@ export function FamilyPerformance({
                 hint="Money-weighted (XIRR) across all accounts"
               />
               <StatTile
-                label={r.benchmark ? `${r.benchmark.code} return` : 'Benchmark'}
+                label={r.benchmark ? `${benchmarkLabel(r.benchmark.code)} return` : 'Benchmark'}
                 value={
                   r.benchmark?.interim != null
                     ? signedPct(r.benchmark.interim)
@@ -315,6 +373,40 @@ export function FamilyPerformance({
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
                 {r.benchmark.reason}
               </p>
+            )}
+
+            {/* A comparison is a what-if until saved — said beside the figures so
+                a screenshot of it is never mistaken for the household's own. */}
+            {compareCode && compareCode !== assignedCode && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 p-3">
+                <p className="text-[12px] leading-relaxed text-ink-secondary">
+                  Comparing against{' '}
+                  <span className="font-semibold text-ink">{benchmarkLabel(compareCode)}</span> for
+                  this view only. The household&apos;s benchmark is {benchmarkLabel(assignedCode)}.
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setCompare(null)}>
+                    Reset
+                  </Button>
+                  {r.members.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={savingDefault}
+                      onClick={() =>
+                        applyToMembers(
+                          compareCode,
+                          r.members.map((m) => m.clientId),
+                        )
+                      }
+                    >
+                      {savingDefault
+                        ? 'Saving…'
+                        : `Use ${benchmarkLabel(compareCode)} for all ${r.members.length} members`}
+                    </Button>
+                  )}
+                </div>
+              </div>
             )}
           </>
         ) : customHint ? (
