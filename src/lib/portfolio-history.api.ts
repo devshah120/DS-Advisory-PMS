@@ -153,6 +153,11 @@ export interface PeriodReturn {
   benchmark: BenchmarkWindowResult | null;
   /** Portfolio − benchmark over this window, both money-weighted. */
   alpha: number | null;
+  /**
+   * The client's own benchmark (stored, or the book default). Differs from
+   * `benchmark.code` when the sheet is comparing against another index.
+   */
+  assignedBenchmarkCode: string | null;
 }
 
 export interface AutoSeedSummary {
@@ -189,20 +194,33 @@ export const portfolioHistoryApi = {
   },
 
   /** `period` is any code from `periods()` — 'QTD', 'FYTD', 'Q2-FY27', … */
-  async periodReturn(clientId: string, period: PerformancePeriod): Promise<PeriodReturn> {
+  /**
+   * `benchmark` compares against another index in the client's book for this
+   * request only — nothing is saved. Omit it to use the client's own benchmark.
+   */
+  async periodReturn(
+    clientId: string,
+    period: PerformancePeriod,
+    benchmark?: string,
+  ): Promise<PeriodReturn> {
     const res = await apiClient
       .getClient()
       .get<PeriodReturn>(`/clients/${clientId}/portfolio-history/return`, {
-        params: { period },
+        params: { period, ...(benchmark ? { benchmark } : {}) },
       });
     return res.data;
   },
 
-  async customReturn(clientId: string, from: Date, to: Date): Promise<PeriodReturn> {
+  async customReturn(
+    clientId: string,
+    from: Date,
+    to: Date,
+    benchmark?: string,
+  ): Promise<PeriodReturn> {
     const res = await apiClient
       .getClient()
       .get<PeriodReturn>(`/clients/${clientId}/portfolio-history/return`, {
-        params: { from: iso(from), to: iso(to) },
+        params: { from: iso(from), to: iso(to), ...(benchmark ? { benchmark } : {}) },
       });
     return res.data;
   },

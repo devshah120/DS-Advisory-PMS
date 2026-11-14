@@ -9,7 +9,9 @@ import {
   PeriodOption,
 } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
-import { useCurrency } from '@/components/layout/MarketContext';
+import { useCurrency, useMarket } from '@/components/layout/MarketContext';
+import { MARKET_BENCHMARKS } from '@/lib/market-scope';
+import { clientsApi } from '@/lib/clients.api';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 import {
   DEFAULT_INCEPTION_ISO,
@@ -107,6 +109,20 @@ export function PeriodPerformance({
   const [reloadTick, setReloadTick] = useState(0);
 
   /**
+   * Which index to measure against. Null = the client's own benchmark. Keyed by
+   * client so switching client drops the comparison in the same render, rather
+   * than first fetching the new client against the previous one's choice.
+   */
+  const { market } = useMarket();
+  const benchmarkOptions = MARKET_BENCHMARKS[market];
+  const [compare, setCompare] = useState<{ clientId: string; code: string } | null>(null);
+  const compareCode = compare?.clientId === clientId ? compare.code : null;
+  const [savingDefault, setSavingDefault] = useState(false);
+  const assignedCode = periodReturn?.assignedBenchmarkCode ?? null;
+  const benchmarkLabel = (code: string | null | undefined) =>
+    benchmarkOptions.find((b) => b.code === code)?.label ?? code ?? 'Benchmark';
+
+  /**
    * The floor for the date picker: this client's own inception, as reported by
    * the periods endpoint. Falls back to the house date only until the options
    * have loaded — every option carries the same value, so the first one does.
@@ -163,8 +179,9 @@ export function PeriodPerformance({
                 clientId,
                 new Date(customFrom),
                 new Date(customTo),
+                compareCode ?? undefined,
               )
-            : await portfolioHistoryApi.periodReturn(clientId, period);
+            : await portfolioHistoryApi.periodReturn(clientId, period, compareCode ?? undefined);
 
         const ao = await portfolioHistoryApi.asOf(clientId, new Date(pr.to));
 
@@ -189,7 +206,7 @@ export function PeriodPerformance({
     return () => {
       cancelled = true;
     };
-  }, [clientId, period, customFrom, customTo, reloadTick, refreshSignal]);
+  }, [clientId, period, customFrom, customTo, compareCode, reloadTick, refreshSignal]);
 
   /**
    * Mirror the sheet's state up to the page so its header Export button knows
@@ -225,6 +242,26 @@ export function PeriodPerformance({
     }
   }
 
+  /**
+   * Saves the benchmark being compared against as the client's own, so every
+   * later view, export and review pack uses it without re-selecting.
+   */
+  async function makeDefault(code: string) {
+    setSavingDefault(true);
+    try {
+      await clientsApi.update(clientId, { benchmark: code });
+      toast({ tone: 'success', title: `${benchmarkLabel(code)} is now this client's benchmark` });
+      setCompare(null);
+      setReloadTick((t) => t + 1);
+    } catch (e: any) {
+      const msg =
+        e?.response?.data?.errors?.benchmark ?? e?.response?.data?.message ?? 'Could not save';
+      toast({ tone: 'error', title: typeof msg === 'string' ? msg : 'Could not save' });
+    } finally {
+      setSavingDefault(false);
+    }
+  }
+
   /** Options grouped into optgroups, preserving the backend's ordering. */
   const grouped = useMemo(() => {
     const out: Array<{ group: string; items: PeriodOption[] }> = [];
@@ -256,6 +293,22 @@ export function PeriodPerformance({
             </optgroup>
           ))
         )}
+      </Select>
+      <Select
+        aria-label="Compare against"
+        value={compareCode ?? assignedCode ?? ''}
+        onChange={(e) => {
+          const code = e.target.value;
+          setCompare(!code || code === assignedCode ? null : { clientId, code });
+        }}
+      >
+        {!assignedCode && !compareCode && <option value="">Client&apos;s benchmark</option>}
+        {benchmarkOptions.map((b) => (
+          <option key={b.code} value={b.code}>
+            vs {b.label}
+            {b.code === assignedCode ? ' (client default)' : ''}
+          </option>
+        ))}
       </Select>
       {period === 'CUSTOM' && (
         <>
@@ -364,7 +417,11 @@ export function PeriodPerformance({
                 hint="Money-weighted (XIRR), flow-adjusted"
               />
               <StatTile
-                label={periodReturn.benchmark ? `${periodReturn.benchmark.code} return` : 'Benchmark'}
+                label={
+                  periodReturn.benchmark
+                    ? `${benchmarkLabel(periodReturn.benchmark.code)} return`
+                    : 'Benchmark'
+                }
                 value={
                   periodReturn.benchmark?.interim != null
                     ? signedPct(periodReturn.benchmark.interim)
@@ -412,6 +469,31 @@ export function PeriodPerformance({
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
                 {periodReturn.benchmark.reason}
               </p>
+            )}
+
+            {/* A comparison is a what-if until saved — say so beside the figures,
+                so a screenshot of it is never mistaken for the mandate's own. */}
+            {compareCode && compareCode !== assignedCode && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 p-3">
+                <p className="text-[12px] leading-relaxed text-ink-secondary">
+                  Comparing against <span className="font-semibold text-ink">{benchmarkLabel(compareCode)}</span>{' '}
+                  for this view only. This client&apos;s benchmark is{' '}
+                  {benchmarkLabel(assignedCode)}.
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setCompare(null)}>
+                    Reset
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={savingDefault}
+                    onClick={() => makeDefault(compareCode)}
+                  >
+                    {savingDefault ? 'Saving…' : `Make ${benchmarkLabel(compareCode)} the default`}
+                  </Button>
+                </div>
+              </div>
             )}
           </>
         ) : customHint ? (
