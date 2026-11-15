@@ -263,38 +263,48 @@ function drawNotes(doc: jsPDF, y: number, notes: string[]): void {
   }
 }
 
-/** A landscape detail page's navy title bar. Returns the y below it. */
-function drawDetailBar(doc: jsPDF, title: string, right?: string): number {
-  const w = PAGE_H; // landscape: the long edge is now the width
-  doc.setFillColor(...NAVY);
-  doc.rect(0, 0, w, 36, 'F');
-  doc.setFont(PDF_FONT, 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(...WHITE);
-  doc.text(title, MARGIN, 23);
-  if (right) {
-    doc.setFont(PDF_FONT, 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(...LIGHT_NAVY);
-    doc.text(right, w - MARGIN, 23, { align: 'right' });
-  }
-  return 36;
+/**
+ * A full-width detail table on the same portrait page as the summary, under a
+ * navy title bar, with its column headers in light navy beneath. A long table
+ * continues onto further portrait pages, repeating both header rows, so the
+ * document never switches orientation part-way through.
+ */
+function detailHead(title: string, columns: string[], firstNumericCol: number) {
+  return [
+    [{ content: title, colSpan: columns.length, styles: { ...HEAD_STYLES, halign: 'left' as const } }],
+    columns.map((c, i) => ({
+      content: c,
+      styles: {
+        fillColor: LIGHT_NAVY,
+        textColor: INK,
+        fontStyle: 'bold' as const,
+        lineColor: BORDER,
+        lineWidth: RULE_W,
+        halign: i >= firstNumericCol ? ('right' as const) : ('left' as const),
+      },
+    })),
+  ];
 }
 
-/** The holdings detail, on its own landscape page, ranked by market value. */
-function drawHoldingsPage(doc: jsPDF, asOf: PortfolioAsOf, money: Money, currency: string): void {
-  doc.addPage('a4', 'landscape');
-  const w = PAGE_H;
-  drawDetailBar(doc, `HOLDINGS AS AT ${fmtLongDate(asOf.asOfDate).toUpperCase()}`);
-  drawAmountsCaption(doc, currency, 54, w - MARGIN);
+/** Space between the summary panels and the detail table below them. */
+const SECTION_GAP = 22;
+/** Room kept clear above the page footer stamp. */
+const FOOTER_CLEARANCE = 44;
 
+/** The holdings detail, under the summary, ranked by market value. */
+function drawHoldingsTable(doc: jsPDF, asOf: PortfolioAsOf, money: Money, y: number): number {
   const positions = [...asOf.positions].sort((a, b) => b.marketValue - a.marketValue);
 
   autoTable(doc, {
-    startY: 62,
-    margin: { left: MARGIN, right: MARGIN },
+    startY: y + SECTION_GAP,
+    margin: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: FOOTER_CLEARANCE },
     theme: 'plain',
-    head: [['Ticker', 'Sector', 'Quantity', 'Avg Cost', 'Close', 'Market Value', 'Cost Basis', 'Unrealized', 'Weight']],
+    showHead: 'everyPage',
+    head: detailHead(
+      `HOLDINGS AS AT ${fmtLongDate(asOf.asOfDate).toUpperCase()}`,
+      ['Ticker', 'Sector', 'Quantity', 'Avg Cost', 'Close', 'Market Value', 'Cost Basis', 'Unrealized', 'Weight'],
+      2,
+    ),
     body: positions.map((p) => [
       p.ticker,
       p.sector || '—',
@@ -317,9 +327,8 @@ function drawHoldingsPage(doc: jsPDF, asOf: PortfolioAsOf, money: Money, currenc
       money(asOf.unrealizedGain),
       shareText(positions.reduce((s, p) => s + p.weight, 0)),
     ]],
-    headStyles: HEAD_STYLES,
     footStyles: FOOT_STYLES,
-    styles: TABLE_STYLES,
+    styles: { ...TABLE_STYLES, fontSize: 8.5, cellPadding: { top: 4, bottom: 4, left: 4, right: 4 } },
     columnStyles: {
       0: { fontStyle: 'bold' },
       2: { halign: 'right' },
@@ -332,30 +341,31 @@ function drawHoldingsPage(doc: jsPDF, asOf: PortfolioAsOf, money: Money, currenc
     },
     alternateRowStyles: { fillColor: ZEBRA },
     didParseCell: (data) => {
-      if (data.section !== 'body' && data.column.index >= 2) data.cell.styles.halign = 'right';
+      if (data.section === 'foot' && data.column.index >= 2) data.cell.styles.halign = 'right';
     },
   });
+  return (doc as any).lastAutoTable.finalY as number;
 }
 
 /**
- * The per-account breakdown, on its own page. Member returns are each
- * account's own figure and deliberately do not average to the household's;
- * Net Gain is the column that sums.
+ * The per-account breakdown, under the household summary. Member returns are
+ * each account's own figure and deliberately do not average to the
+ * household's; Net Gain is the column that sums.
  */
-function drawMembersPage(doc: jsPDF, fr: FamilyPeriodReturn, money: Money, currency: string): void {
-  doc.addPage('a4', 'landscape');
-  const w = PAGE_H;
-  drawDetailBar(doc, `ACCOUNTS IN ${fr.familyName.toUpperCase()}`, familyTimeFrameLabel(fr));
-  drawAmountsCaption(doc, currency, 54, w - MARGIN);
-
+function drawMembersTable(doc: jsPDF, fr: FamilyPeriodReturn, money: Money, y: number): number {
   const members = [...fr.members].sort((a, b) => b.closingValue - a.closingValue);
   const ret = (v: number | null) => (v === null ? NOT_AVAILABLE : rateText(v));
 
   autoTable(doc, {
-    startY: 62,
-    margin: { left: MARGIN, right: MARGIN },
+    startY: y + SECTION_GAP,
+    margin: { left: MARGIN, right: MARGIN, top: MARGIN, bottom: FOOTER_CLEARANCE },
     theme: 'plain',
-    head: [['Account', 'Opening', 'Net Flows', 'Closing', 'Net Gain', 'Return', 'Weight']],
+    showHead: 'everyPage',
+    head: detailHead(
+      `ACCOUNTS IN ${fr.familyName.toUpperCase()}`,
+      ['Account', 'Opening', 'Net Flows', 'Closing', 'Net Gain', 'Return', 'Weight'],
+      1,
+    ),
     body: members.map((m) => [
       m.entryDate ? `${m.clientName} · joined ${fmtLongDate(m.entryDate)}` : m.clientName,
       money(m.openingValue),
@@ -374,11 +384,10 @@ function drawMembersPage(doc: jsPDF, fr: FamilyPeriodReturn, money: Money, curre
       ret(fr.returnPct),
       shareText(1),
     ]],
-    headStyles: HEAD_STYLES,
     footStyles: FOOT_STYLES,
     styles: TABLE_STYLES,
     columnStyles: {
-      0: { fontStyle: 'bold' },
+      0: { fontStyle: 'bold', cellWidth: CONTENT_W * 0.25 },
       1: { halign: 'right' },
       2: { halign: 'right' },
       3: { halign: 'right' },
@@ -388,9 +397,10 @@ function drawMembersPage(doc: jsPDF, fr: FamilyPeriodReturn, money: Money, curre
     },
     alternateRowStyles: { fillColor: ZEBRA },
     didParseCell: (data) => {
-      if (data.section !== 'body' && data.column.index >= 1) data.cell.styles.halign = 'right';
+      if (data.section === 'foot' && data.column.index >= 1) data.cell.styles.halign = 'right';
     },
   });
+  return (doc as any).lastAutoTable.finalY as number;
 }
 
 /** Builds the client period statement as a PDF document. Fonts must be loaded. */
@@ -414,9 +424,8 @@ export function buildPeriodPerformancePdf(
   y = drawHeadline(doc, pr, y);
   y = drawAmountsCaption(doc, currency, y);
   y = drawTwoColumns(doc, y, periodLeftPanels(pr, asOf), periodRightLines(pr), money);
+  if (asOf && asOf.positions.length) y = drawHoldingsTable(doc, asOf, money, y);
   drawNotes(doc, y, periodNotes(pr, asOf));
-
-  if (asOf && asOf.positions.length) drawHoldingsPage(doc, asOf, money, currency);
 
   stampPageNumbers(doc, STATEMENT_FOOTER);
   return doc;
@@ -437,9 +446,8 @@ export function buildFamilyPerformancePdf(fr: FamilyPeriodReturn, currency: stri
   y = drawIdentity(doc, fr.familyName, new Date(fr.to), familyTimeFrameLabel(fr), y);
   y = drawHeadline(doc, fr, y);
   y = drawAmountsCaption(doc, currency, y);
-  drawTwoColumns(doc, y, familyLeftPanels(fr), familyRightLines(fr), money);
-
-  if (fr.members.length) drawMembersPage(doc, fr, money, currency);
+  y = drawTwoColumns(doc, y, familyLeftPanels(fr), familyRightLines(fr), money);
+  if (fr.members.length) drawMembersTable(doc, fr, money, y);
 
   stampPageNumbers(doc, STATEMENT_FOOTER);
   return doc;
