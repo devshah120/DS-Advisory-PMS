@@ -153,6 +153,8 @@ export interface PeriodReturn {
   benchmark: BenchmarkWindowResult | null;
   /** Portfolio − benchmark over this window, both money-weighted. */
   alpha: number | null;
+  /** XIRR p.a. − benchmark XIRR p.a.; the headline alpha on windows of a year or more. */
+  annualizedAlpha: number | null;
   /**
    * The client's own benchmark (stored, or the book default). Differs from
    * `benchmark.code` when the sheet is comparing against another index.

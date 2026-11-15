@@ -233,8 +233,8 @@ export default function PerformancePage() {
   usePageHeading({
     title: 'Performance',
     subtitle: familyId
-      ? 'The household measured as one account, over the period you select'
-      : 'Transactional XIRR, measured over the period you select',
+      ? 'Consolidated household performance and benchmark attribution'
+      : 'Portfolio performance and benchmark attribution',
     actions: (
       <>
         {/**

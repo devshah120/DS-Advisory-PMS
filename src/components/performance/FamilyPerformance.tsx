@@ -9,7 +9,13 @@ import {
 import { PeriodOption } from '@/lib/portfolio-history.api';
 import { formatCurrency, formatSignedCurrency, cn } from '@/lib/utils';
 import { useCurrency, useMarket } from '@/components/layout/MarketContext';
-import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
+import { Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
+import {
+  CapitalReconciliation,
+  ReturnHeadline,
+  returnBasis,
+  signedPct,
+} from '@/components/performance/ReturnBasis';
 import { MARKET_BENCHMARKS } from '@/lib/market-scope';
 import { clientsApi } from '@/lib/clients.api';
 import {
@@ -19,7 +25,6 @@ import {
   todayIso,
 } from '@/lib/custom-range';
 
-const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
 
 const fmtDate = (iso: string) =>
@@ -53,10 +58,12 @@ export interface FamilySheetState {
  * answers "how is this family doing", and the table answers the question that
  * always follows it, "which account moved it".
  *
- * A note the sheet itself makes, because it is the most likely
- * misreading: the member returns do NOT average to the household return, and
- * are not supposed to. The household is one XIRR over the family's combined
- * flows. The column that does reconcile is Gain, which sums exactly.
+ * The member returns do NOT average to the household return, and are not
+ * supposed to: the household is one XIRR over the family's combined flows. The
+ * column that reconciles is Net Gain, which sums exactly.
+ *
+ * Reporting basis (see ReturnBasis): sub-year windows lead with the period
+ * money-weighted return; a year or more leads with XIRR p.a.
  */
 export function FamilyPerformance({
   familyId,
@@ -305,7 +312,7 @@ export function FamilyPerformance({
                 r ? (
                   <span className="inline-flex flex-wrap items-center gap-1.5">
                     <Users className="h-3.5 w-3.5" />
-                    {r.memberCount} {r.memberCount === 1 ? 'account' : 'accounts'}, measured as one
+                    {r.memberCount} {r.memberCount === 1 ? 'account' : 'accounts'} · consolidated
                     <span className="text-ink-tertiary">·</span>
                     {fmtDate(r.from)} → {fmtDate(r.to)}
                     <span className="text-ink-tertiary">·</span>
@@ -324,50 +331,7 @@ export function FamilyPerformance({
           <>
             <WindowNotes r={r} />
 
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Headline
-                label={`Family ${r.label} return`}
-                value={r.returnPct}
-                unavailable={r.returnReason}
-                hint="Money-weighted (XIRR) across all accounts"
-              />
-              <StatTile
-                label={r.benchmark ? `${benchmarkLabel(r.benchmark.code)} return` : 'Benchmark'}
-                value={
-                  r.benchmark?.interim != null
-                    ? signedPct(r.benchmark.interim)
-                    : r.benchmark
-                      ? 'Not available'
-                      : 'None set'
-                }
-                tone={
-                  r.benchmark?.interim == null
-                    ? 'neutral'
-                    : r.benchmark.interim >= 0
-                      ? 'pos'
-                      : 'neg'
-                }
-                hint={r.benchmark ? 'Same window, same family flows' : undefined}
-              />
-              <StatTile
-                label="Alpha"
-                value={r.alpha !== null ? signedPct(r.alpha) : 'Not available'}
-                tone={r.alpha === null ? 'neutral' : r.alpha >= 0 ? 'pos' : 'neg'}
-                hint={
-                  r.alpha !== null
-                    ? 'Household − benchmark'
-                    : 'Needs a benchmark and a solved return'
-                }
-              />
-              <StatTile
-                label="Family assets"
-                value={formatCurrency(r.closingValue, currency)}
-                hint={`Gain ${formatSignedCurrency(
-                  r.closingValue - r.openingValue - r.netFlows,
-                  currency,
-                )} net of deposits`}
-              />
-            </div>
+            <HeadlineRow r={r} benchmarkLabel={benchmarkLabel} />
 
             {r.benchmark?.reason && (
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
@@ -421,7 +385,14 @@ export function FamilyPerformance({
       {r && r.members.length > 0 && <MemberBreakdown r={r} />}
 
       {/* ── 3. How the household figure was built. The audit trail. ─────── */}
-      {r && <Reconciliation r={r} />}
+      {r && (
+        <CapitalReconciliation
+          r={r}
+          currency={currency}
+          benchmarkLabel={r.benchmark ? benchmarkLabel(r.benchmark.code) : null}
+          consolidated
+        />
+      )}
     </div>
   );
 }
@@ -439,18 +410,16 @@ function WindowNotes({ r }: { r: FamilyPeriodReturn }) {
 
   if (r.daysClamped > 0 && r.nominalFrom) {
     notes.push(
-      `${r.label} would open on ${fmtDate(r.nominalFrom)}, but the book has no priced history before ` +
-        `30 Jun 2026 — so this measures from then, ${r.daysClamped} days short of the full window.`,
+      `Measured from inception (30 Jun 2026); ${r.label} nominally opens ${fmtDate(r.nominalFrom)} — ` +
+        `${r.daysClamped} days excluded.`,
     );
   }
   if (r.openPeriod) {
-    notes.push('This period is still open — measured to today, not to its close.');
+    notes.push(`Period open — measured to ${fmtDate(r.to)}.`);
   }
   for (const e of r.lateEntrants) {
     notes.push(
-      `${e.clientName} joined this household on ${fmtDate(e.entryDate)}, inside the window. ` +
-        `Its balance is counted as capital arriving on that date, not as household performance — ` +
-        `so the family return measures only the growth earned after it joined.`,
+      `${e.clientName} onboarded ${fmtDate(e.entryDate)}; transferred-in balance treated as a capital inflow.`,
     );
   }
 
@@ -474,77 +443,78 @@ function WindowNotes({ r }: { r: FamilyPeriodReturn }) {
 /**
  * Every member account, each measured on its own, beneath the household figure.
  *
- * The footnote is load-bearing rather than decorative. The single most likely
- * misreading of this table is that the member returns should average to the
- * household return above — they should not, and a reader who assumes they do
- * will conclude the page has a bug. Gain is the column that reconciles, so the
- * table totals that column and says so.
+ * Member returns do not average to the household return (that is one XIRR over
+ * the combined flows); Net Gain is the column that reconciles, so the footer
+ * totals it. Net Flows sits beside Opening so an account funded mid-window
+ * never shows a bare zero opening with no context.
  */
 function MemberBreakdown({ r }: { r: FamilyPeriodReturn }) {
   const currency = useCurrency();
+  const annual = returnBasis(r).annual;
   const totalGain = r.members.reduce((s, m) => s + m.gain, 0);
+  const memberReturn = (m: FamilyPeriodReturn['members'][number]) =>
+    annual ? m.annualizedReturnPct : m.returnPct;
+  const householdReturn = annual ? r.annualizedReturnPct : r.returnPct;
+
+  const th = 'pb-2 text-right font-medium';
+  const td = 'py-2.5 text-right tabular-nums text-ink-secondary';
+  const signTone = (v: number | null) =>
+    v === null ? 'text-ink-tertiary' : v >= 0 ? 'text-emerald-600' : 'text-rose-600';
 
   return (
     <Card>
       <CardHeader
         title="By account"
-        subtitle="Each member measured on its own, the same figure its individual sheet shows"
+        subtitle="Individual portfolio attribution and capital allocation breakdown"
       />
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-[13px]">
+        <table className="w-full min-w-[760px] text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[12px] uppercase tracking-wide text-ink-tertiary">
-              <th className="pb-2 font-medium">Account</th>
-              <th className="pb-2 text-right font-medium">Opening</th>
-              <th className="pb-2 text-right font-medium">Closing</th>
-              <th className="pb-2 text-right font-medium">Weight</th>
-              <th className="pb-2 text-right font-medium">Gain</th>
-              <th className="pb-2 text-right font-medium">Return</th>
+              <th className="pb-2 font-medium">Account / Member</th>
+              <th className={th}>Opening</th>
+              <th className={th}>Net Flows</th>
+              <th className={th}>Closing</th>
+              <th className={th}>Weight</th>
+              <th className={th}>Net Gain</th>
+              <th className={th}>{annual ? 'Return p.a.' : 'Return'}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {r.members.map((m) => (
-              <tr key={m.clientId}>
-                <td className="py-2.5 font-semibold text-ink">
-                  {m.clientName}
-                  {m.entryDate && (
-                    <Badge tone="neutral" className="ml-2">
-                      joined {fmtDate(m.entryDate)}
-                    </Badge>
-                  )}
-                </td>
-                <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                  {formatCurrency(m.openingValue, currency)}
-                </td>
-                <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                  {formatCurrency(m.closingValue, currency)}
-                </td>
-                <td className="py-2.5 text-right tabular-nums text-ink-secondary">
-                  {pct(m.weight)}
-                </td>
-                <td
-                  className={cn(
-                    'py-2.5 text-right font-semibold tabular-nums',
-                    m.gain >= 0 ? 'text-emerald-600' : 'text-rose-600',
-                  )}
-                >
-                  {formatSignedCurrency(m.gain, currency)}
-                </td>
-                <td
-                  className={cn(
-                    'py-2.5 text-right font-semibold tabular-nums',
-                    m.returnPct === null
-                      ? 'text-ink-tertiary'
-                      : m.returnPct >= 0
-                        ? 'text-emerald-600'
-                        : 'text-rose-600',
-                  )}
-                  title={m.returnReason}
-                >
-                  {m.returnPct !== null ? signedPct(m.returnPct) : '—'}
-                </td>
-              </tr>
-            ))}
+            {r.members.map((m) => {
+              const ret = memberReturn(m);
+              return (
+                <tr key={m.clientId}>
+                  <td className="py-2.5">
+                    <span className="font-semibold text-ink">{m.clientName}</span>
+                    {m.sinceDate && (
+                      <span className="block text-[11px] font-normal text-ink-tertiary">
+                        Since {fmtDate(m.sinceDate)}
+                      </span>
+                    )}
+                  </td>
+                  <td className={td}>{formatCurrency(m.openingValue, currency)}</td>
+                  <td className={td}>
+                    {m.netFlows === 0 ? (
+                      <span className="text-ink-tertiary">{formatCurrency(0, currency)}</span>
+                    ) : (
+                      formatSignedCurrency(m.netFlows, currency)
+                    )}
+                  </td>
+                  <td className={td}>{formatCurrency(m.closingValue, currency)}</td>
+                  <td className={td}>{pct(m.weight)}</td>
+                  <td className={cn(td, 'font-semibold', signTone(m.gain))}>
+                    {formatSignedCurrency(m.gain, currency)}
+                  </td>
+                  <td
+                    className={cn(td, 'font-semibold', signTone(ret))}
+                    title={ret === null ? m.returnReason : undefined}
+                  >
+                    {ret !== null ? signedPct(ret) : annual && m.returnPct !== null ? 'n/m' : '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-border font-semibold text-ink">
@@ -553,157 +523,69 @@ function MemberBreakdown({ r }: { r: FamilyPeriodReturn }) {
                 {formatCurrency(r.openingValue, currency)}
               </td>
               <td className="pt-2.5 text-right tabular-nums">
+                {formatSignedCurrency(r.netFlows, currency)}
+              </td>
+              <td className="pt-2.5 text-right tabular-nums">
                 {formatCurrency(r.closingValue, currency)}
               </td>
               <td className="pt-2.5 text-right tabular-nums">100.0%</td>
-              <td
-                className={cn(
-                  'pt-2.5 text-right tabular-nums',
-                  totalGain >= 0 ? 'text-emerald-600' : 'text-rose-600',
-                )}
-              >
+              <td className={cn('pt-2.5 text-right tabular-nums', signTone(totalGain))}>
                 {formatSignedCurrency(totalGain, currency)}
               </td>
-              <td
-                className={cn(
-                  'pt-2.5 text-right tabular-nums',
-                  r.returnPct === null
-                    ? 'text-ink-tertiary'
-                    : r.returnPct >= 0
-                      ? 'text-emerald-600'
-                      : 'text-rose-600',
-                )}
-              >
-                {r.returnPct !== null ? signedPct(r.returnPct) : '—'}
+              <td className={cn('pt-2.5 text-right tabular-nums', signTone(householdReturn))}>
+                {householdReturn !== null ? signedPct(householdReturn) : '—'}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
 
-      <p className="mt-4 rounded-lg bg-surface-2 p-3 text-[12px] leading-relaxed text-ink-secondary">
-        The account returns above do not average to the household return, and are not meant to. The
-        household figure is one money-weighted return solved over the family&apos;s combined cash
-        flows, so an account holding more capital for longer counts for more. Gain is the column
-        that reconciles: the account gains sum to the household&apos;s.
+      <p className="mt-3 text-[11px] text-ink-tertiary">
+        Note: Consolidated household return is capital-weighted across combined cash flows;
+        individual member gains sum precisely to total household net gain.
       </p>
     </Card>
   );
 }
 
-/**
- * The working behind the household headline.
- *
- * Same table as the single-client sheet, with the flow line worded for a
- * household — on this sheet "deposits" includes an account joining, which is
- * money arriving into the family even though no member deposited anything.
- */
-function Reconciliation({ r }: { r: FamilyPeriodReturn }) {
-  const currency = useCurrency();
-  const gap =
-    r.returnPct !== null && r.simpleReturnPct !== null ? r.simpleReturnPct - r.returnPct : null;
-
-  return (
-    <Card>
-      <CardHeader
-        title="How this was calculated"
-        subtitle="The household measured as one account, money-weighted over the selected window"
-      />
-      <div className="mt-4 divide-y divide-border">
-        <Row
-          label={`Combined opening value (${fmtDate(r.from)})`}
-          value={formatCurrency(r.openingValue, currency)}
-        />
-        <Row
-          label={
-            r.lateEntrants.length
-              ? 'Deposits − withdrawals, including accounts joining'
-              : 'Deposits − withdrawals during the period'
-          }
-          value={formatSignedCurrency(r.netFlows, currency)}
-        />
-        <Row
-          label={`Combined closing value (${fmtDate(r.to)})`}
-          value={formatCurrency(r.closingValue, currency)}
-        />
-        <Row
-          label="Money-weighted return (XIRR)"
-          value={r.returnPct !== null ? signedPct(r.returnPct) : 'Not available'}
-          tone={r.returnPct === null ? undefined : r.returnPct >= 0 ? 'pos' : 'neg'}
-          emphasis
-        />
-        <Row
-          label="Annualized"
-          value={
-            r.annualizedReturnPct !== null
-              ? signedPct(r.annualizedReturnPct)
-              : 'Window too short to annualize'
-          }
-          tone={
-            r.annualizedReturnPct === null ? undefined : r.annualizedReturnPct >= 0 ? 'pos' : 'neg'
-          }
-          muted={r.annualizedReturnPct === null}
-        />
-        <Row
-          label="Simple return (closing ÷ opening)"
-          value={r.simpleReturnPct !== null ? signedPct(r.simpleReturnPct) : '—'}
-          muted
-        />
-      </div>
-
-      {gap !== null && Math.abs(gap) > 0.0001 && (
-        <p className="mt-4 rounded-lg bg-surface-2 p-3 text-[12px] leading-relaxed text-ink-secondary">
-          The simple return reads {signedPct(gap)} higher than the money-weighted one because it
-          treats the {formatSignedCurrency(r.netFlows, currency)} that entered this household during
-          the window as performance. The money-weighted figure above does not, which is why it is
-          the one reported.
-        </p>
-      )}
-    </Card>
-  );
-}
-
-/** The one number the sheet exists to show. Same treatment as the client sheet. */
-function Headline({
-  label,
-  value,
-  hint,
-  unavailable,
+/** Headline return, benchmark, alpha and assets — all on the window's reporting basis. */
+function HeadlineRow({
+  r,
+  benchmarkLabel,
 }: {
-  label: string;
-  value: number | null;
-  hint?: string;
-  unavailable?: string;
+  r: FamilyPeriodReturn;
+  benchmarkLabel: (code: string | null | undefined) => string;
 }) {
-  if (value === null) {
-    return (
-      <div className="rounded-xl border-2 border-border p-4">
-        <p className="text-[12px] font-medium uppercase tracking-wide text-ink-tertiary">{label}</p>
-        <p className="mt-2 text-[18px] font-semibold text-ink-tertiary">Not available</p>
-        <p className="mt-1 text-[12px] leading-relaxed text-ink-tertiary">
-          {unavailable ?? 'The return could not be solved for this window.'}
-        </p>
-      </div>
-    );
-  }
+  const currency = useCurrency();
+  const basis = returnBasis(r);
+  const tone = (v: number | null) => (v === null ? 'neutral' : v >= 0 ? 'pos' : 'neg');
 
   return (
-    <div
-      className={cn(
-        'rounded-xl border-2 p-4',
-        value >= 0 ? 'border-emerald-200 bg-emerald-50/40' : 'border-rose-200 bg-rose-50/40',
-      )}
-    >
-      <p className="text-[12px] font-medium uppercase tracking-wide text-ink-tertiary">{label}</p>
-      <p
-        className={cn(
-          'mt-2 text-[30px] font-semibold tabular-nums tracking-tight',
-          value >= 0 ? 'text-emerald-600' : 'text-rose-600',
-        )}
-      >
-        {signedPct(value)}
-      </p>
-      {hint && <p className="mt-1 text-[12px] text-ink-tertiary">{hint}</p>}
+    <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <ReturnHeadline r={r} unavailable={r.returnReason} />
+      <StatTile
+        label={r.benchmark ? `${benchmarkLabel(r.benchmark.code)} return` : 'Benchmark'}
+        value={
+          basis.benchmark !== null
+            ? `${signedPct(basis.benchmark)}${basis.suffix}`
+            : r.benchmark
+              ? 'Not available'
+              : 'None set'
+        }
+        tone={tone(basis.benchmark)}
+        hint={r.benchmark ? 'Cash-flow matched' : undefined}
+      />
+      <StatTile
+        label="Alpha"
+        value={basis.alpha !== null ? `${signedPct(basis.alpha)}${basis.suffix}` : 'Not available'}
+        tone={tone(basis.alpha)}
+        hint={basis.alpha !== null ? 'Excess return over benchmark' : undefined}
+      />
+      <StatTile
+        label="Household assets"
+        value={formatCurrency(r.closingValue, currency)}
+        hint={`Net gain ${formatSignedCurrency(r.closingValue - r.openingValue - r.netFlows, currency)}`}
+      />
     </div>
   );
 }
@@ -733,46 +615,6 @@ function StatTile({
         {value}
       </p>
       {hint && <p className="mt-1 text-[12px] text-ink-tertiary">{hint}</p>}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  tone,
-  emphasis,
-  muted,
-}: {
-  label: string;
-  value: string;
-  tone?: 'pos' | 'neg';
-  emphasis?: boolean;
-  muted?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <span
-        className={cn(
-          'text-[13px]',
-          emphasis ? 'font-semibold text-ink' : 'text-ink-secondary',
-          muted && 'text-ink-tertiary',
-        )}
-      >
-        {label}
-      </span>
-      <span
-        className={cn(
-          'text-[13px] tabular-nums',
-          emphasis && 'text-[15px] font-semibold',
-          muted && 'text-ink-tertiary',
-          !muted && tone === 'pos' && 'text-emerald-600',
-          !muted && tone === 'neg' && 'text-rose-600',
-          !muted && !tone && 'text-ink-secondary',
-        )}
-      >
-        {value}
-      </span>
     </div>
   );
 }

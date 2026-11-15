@@ -19,17 +19,21 @@ export interface FamilyMemberPerformance {
   closingValue: number;
   netFlows: number;
   /**
-   * The account measured on its own — the same figure its individual sheet
-   * shows, so the two can be cross-checked. Null when the account cannot be
-   * solved standalone (typically a member that joined mid-window), which does
-   * NOT remove it from the household total.
+   * The account's own period money-weighted return — the same figure its
+   * individual sheet shows. An account funded mid-window is measured from its
+   * first purchase. Null only when it had neither an opening value nor a
+   * recorded inflow (a late entrant imputed at its closing value).
    */
   returnPct: number | null;
+  /** The same rate per annum; null under 30 invested days. */
+  annualizedReturnPct: number | null;
   returnReason?: string;
-  /** Value change over the window, net of that account's own deposits. */
+  /** Value change over the window, net of that account's own flows. Sums to the household's. */
   gain: number;
   /** Set when the account joins after the window opens. */
   entryDate?: string;
+  /** When this account's capital first arrived, if after the window opened. */
+  sinceDate?: string;
   /** Share of the household's closing value. */
   weight: number;
 }
@@ -70,6 +74,8 @@ export interface FamilyPeriodReturn {
     reason?: string;
   } | null;
   alpha: number | null;
+  /** XIRR p.a. − benchmark XIRR p.a.; the headline alpha on windows of a year or more. */
+  annualizedAlpha: number | null;
   /** The household's own index; differs from `benchmark.code` while comparing. */
   assignedBenchmarkCode: string | null;
 

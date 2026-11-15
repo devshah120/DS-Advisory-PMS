@@ -153,7 +153,7 @@ function SidebarBody({
               className="min-w-0"
             >
               <p className="truncate text-[15px] font-semibold tracking-tight text-ink">Giriraj Global Consultants</p>
-              <p className="truncate text-[11px] text-ink-tertiary">Equity &amp; ETF Advisory</p>
+              <p className="truncate text-[11px] text-ink-tertiary">Portfolio Analytics &amp; Reporting</p>
             </motion.div>
           )}
         </AnimatePresence>

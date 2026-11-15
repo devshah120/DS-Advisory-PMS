@@ -14,13 +14,18 @@ import { MARKET_BENCHMARKS } from '@/lib/market-scope';
 import { clientsApi } from '@/lib/clients.api';
 import { Badge, Button, Card, CardHeader, Input, Select, Skeleton, useToast } from '@/components/ui';
 import {
+  CapitalReconciliation,
+  ReturnHeadline,
+  returnBasis,
+  signedPct,
+} from '@/components/performance/ReturnBasis';
+import {
   DEFAULT_INCEPTION_ISO,
   isUsableRange,
   rangeHint,
   todayIso,
 } from '@/lib/custom-range';
 
-const signedPct = (v: number, dp = 2) => `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pct = (v: number, dp = 1) => `${(v * 100).toFixed(dp)}%`;
 
 const fmtDate = (iso: string) =>
@@ -51,9 +56,10 @@ const fmtDate = (iso: string) =>
  * inception is just another entry in the same dropdown, because it is just
  * another window.
  *
- * Every figure on this page is money-weighted (XIRR) and every figure is for the
- * SELECTED window — including the benchmark and the alpha. That uniformity is
- * the point: a reader never has to ask what basis a number is on.
+ * Every figure on this page is money-weighted and for the SELECTED window —
+ * including the benchmark and the alpha. Sub-year windows lead with the period
+ * MWRR, a year or more with XIRR p.a. (see ReturnBasis), and the benchmark and
+ * alpha always follow the headline's basis.
  */
 /**
  * What the page above needs to know to drive its own header buttons.
@@ -409,61 +415,7 @@ export function PeriodPerformance({
           <>
             <WindowNotes r={periodReturn} />
 
-            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Headline
-                label={`${periodReturn.label} return`}
-                value={periodReturn.returnPct}
-                unavailable={periodReturn.returnReason}
-                hint="Money-weighted (XIRR), flow-adjusted"
-              />
-              <StatTile
-                label={
-                  periodReturn.benchmark
-                    ? `${benchmarkLabel(periodReturn.benchmark.code)} return`
-                    : 'Benchmark'
-                }
-                value={
-                  periodReturn.benchmark?.interim != null
-                    ? signedPct(periodReturn.benchmark.interim)
-                    : periodReturn.benchmark
-                      ? 'Not available'
-                      : 'None set'
-                }
-                tone={
-                  periodReturn.benchmark?.interim == null
-                    ? 'neutral'
-                    : periodReturn.benchmark.interim >= 0
-                      ? 'pos'
-                      : 'neg'
-                }
-                hint={periodReturn.benchmark ? 'Same window, same flows' : undefined}
-              />
-              <StatTile
-                label="Alpha"
-                value={periodReturn.alpha !== null ? signedPct(periodReturn.alpha) : 'Not available'}
-                tone={
-                  periodReturn.alpha === null ? 'neutral' : periodReturn.alpha >= 0 ? 'pos' : 'neg'
-                }
-                hint={
-                  periodReturn.alpha !== null
-                    ? 'Portfolio − benchmark'
-                    : 'Needs a benchmark and a solved return'
-                }
-              />
-              <StatTile
-                label="Gain"
-                value={formatSignedCurrency(
-                  periodReturn.closingValue - periodReturn.openingValue - periodReturn.netFlows,
-                  currency,
-                )}
-                tone={
-                  periodReturn.closingValue - periodReturn.openingValue - periodReturn.netFlows >= 0
-                    ? 'pos'
-                    : 'neg'
-                }
-                hint="Value change, net of deposits"
-              />
-            </div>
+            <HeadlineRow r={periodReturn} benchmarkLabel={benchmarkLabel} />
 
             {periodReturn.benchmark?.reason && (
               <p className="mt-3 text-[12px] leading-relaxed text-amber-600">
@@ -505,7 +457,15 @@ export function PeriodPerformance({
       </Card>
 
       {/* ── 2. How the headline was built. The audit trail. ─────────────── */}
-      {periodReturn && <Reconciliation r={periodReturn} />}
+      {periodReturn && (
+        <CapitalReconciliation
+          r={periodReturn}
+          currency={currency}
+          benchmarkLabel={
+            periodReturn.benchmark ? benchmarkLabel(periodReturn.benchmark.code) : null
+          }
+        />
+      )}
 
       {/* ── 3. The book on the window's end date. ───────────────────────── */}
       {asOf && (
@@ -643,12 +603,12 @@ function WindowNotes({ r }: { r: PeriodReturn }) {
 
   if (r.daysClamped > 0 && r.nominalFrom) {
     notes.push(
-      `${r.label} would open on ${fmtDate(r.nominalFrom)}, but the book has no priced history before ` +
-        `30 Jun 2026 — so this measures from then, ${r.daysClamped} days short of the full window.`,
+      `Measured from inception (30 Jun 2026); ${r.label} nominally opens ${fmtDate(r.nominalFrom)} — ` +
+        `${r.daysClamped} days excluded.`,
     );
   }
   if (r.openPeriod) {
-    notes.push('This period is still open — measured to today, not to its close.');
+    notes.push(`Period open — measured to ${fmtDate(r.to)}.`);
   }
 
   if (!notes.length) return null;
@@ -668,113 +628,46 @@ function WindowNotes({ r }: { r: PeriodReturn }) {
   );
 }
 
-/**
- * The working behind the headline: opening value, what money moved, closing
- * value, and the two return figures side by side.
- *
- * The simple return is here rather than on the headline row deliberately. It
- * ties to a custody statement, so operators do ask for it — but it counts a
- * deposit as performance, and on a book that took a large mid-window
- * contribution it is the flattering number. Showing both, adjacent and
- * labelled, is what stops the flattering one being quoted by accident.
- */
-function Reconciliation({ r }: { r: PeriodReturn }) {
-  const currency = useCurrency();
-  const gap =
-    r.returnPct !== null && r.simpleReturnPct !== null ? r.simpleReturnPct - r.returnPct : null;
-
-  return (
-    <Card>
-      <CardHeader
-        title="How this was calculated"
-        subtitle="Every figure above is money-weighted over the selected window"
-      />
-      <div className="mt-4 divide-y divide-border">
-        <Row label={`Opening value (${fmtDate(r.from)})`} value={formatCurrency(r.openingValue, currency)} />
-        <Row
-          label="Deposits − withdrawals during the period"
-          value={formatSignedCurrency(r.netFlows, currency)}
-        />
-        <Row label={`Closing value (${fmtDate(r.to)})`} value={formatCurrency(r.closingValue, currency)} />
-        <Row
-          label="Money-weighted return (XIRR)"
-          value={r.returnPct !== null ? signedPct(r.returnPct) : 'Not available'}
-          tone={r.returnPct === null ? undefined : r.returnPct >= 0 ? 'pos' : 'neg'}
-          emphasis
-        />
-        <Row
-          label="Annualized"
-          value={
-            r.annualizedReturnPct !== null
-              ? signedPct(r.annualizedReturnPct)
-              : 'Window too short to annualize'
-          }
-          tone={
-            r.annualizedReturnPct === null ? undefined : r.annualizedReturnPct >= 0 ? 'pos' : 'neg'
-          }
-          muted={r.annualizedReturnPct === null}
-        />
-        <Row
-          label="Simple return (closing ÷ opening)"
-          value={r.simpleReturnPct !== null ? signedPct(r.simpleReturnPct) : '—'}
-          muted
-        />
-      </div>
-
-      {/* Only worth saying when the two actually diverge — below a basis point
-          the distinction is noise and the note would be clutter. */}
-      {gap !== null && Math.abs(gap) > 0.0001 && (
-        <p className="mt-4 rounded-lg bg-surface-2 p-3 text-[12px] leading-relaxed text-ink-secondary">
-          The simple return reads {signedPct(gap)} higher than the money-weighted one because it
-          treats the {formatSignedCurrency(r.netFlows, currency)} of net deposits in this window as
-          performance. The money-weighted figure above does not, which is why it is the one reported.
-        </p>
-      )}
-    </Card>
-  );
-}
-
-/** The one number the page exists to show. Sized and placed to be read first. */
-function Headline({
-  label,
-  value,
-  hint,
-  unavailable,
+/** Headline return, benchmark, alpha and net gain — all on the window's reporting basis. */
+function HeadlineRow({
+  r,
+  benchmarkLabel,
 }: {
-  label: string;
-  value: number | null;
-  hint?: string;
-  unavailable?: string;
+  r: PeriodReturn;
+  benchmarkLabel: (code: string | null | undefined) => string;
 }) {
-  if (value === null) {
-    return (
-      <div className="rounded-xl border-2 border-border p-4">
-        <p className="text-[12px] font-medium uppercase tracking-wide text-ink-tertiary">{label}</p>
-        <p className="mt-2 text-[18px] font-semibold text-ink-tertiary">Not available</p>
-        <p className="mt-1 text-[12px] leading-relaxed text-ink-tertiary">
-          {unavailable ?? 'The return could not be solved for this window.'}
-        </p>
-      </div>
-    );
-  }
+  const currency = useCurrency();
+  const basis = returnBasis(r);
+  const gain = r.closingValue - r.openingValue - r.netFlows;
+  const tone = (v: number | null) => (v === null ? 'neutral' : v >= 0 ? 'pos' : 'neg');
 
   return (
-    <div
-      className={cn(
-        'rounded-xl border-2 p-4',
-        value >= 0 ? 'border-emerald-200 bg-emerald-50/40' : 'border-rose-200 bg-rose-50/40',
-      )}
-    >
-      <p className="text-[12px] font-medium uppercase tracking-wide text-ink-tertiary">{label}</p>
-      <p
-        className={cn(
-          'mt-2 text-[30px] font-semibold tabular-nums tracking-tight',
-          value >= 0 ? 'text-emerald-600' : 'text-rose-600',
-        )}
-      >
-        {signedPct(value)}
-      </p>
-      {hint && <p className="mt-1 text-[12px] text-ink-tertiary">{hint}</p>}
+    <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <ReturnHeadline r={r} unavailable={r.returnReason} />
+      <StatTile
+        label={r.benchmark ? `${benchmarkLabel(r.benchmark.code)} return` : 'Benchmark'}
+        value={
+          basis.benchmark !== null
+            ? `${signedPct(basis.benchmark)}${basis.suffix}`
+            : r.benchmark
+              ? 'Not available'
+              : 'None set'
+        }
+        tone={tone(basis.benchmark)}
+        hint={r.benchmark ? 'Cash-flow matched' : undefined}
+      />
+      <StatTile
+        label="Alpha"
+        value={basis.alpha !== null ? `${signedPct(basis.alpha)}${basis.suffix}` : 'Not available'}
+        tone={tone(basis.alpha)}
+        hint={basis.alpha !== null ? 'Excess return over benchmark' : undefined}
+      />
+      <StatTile
+        label="Net gain"
+        value={formatSignedCurrency(gain, currency)}
+        tone={tone(gain)}
+        hint="Net of capital flows"
+      />
     </div>
   );
 }
@@ -804,46 +697,6 @@ function StatTile({
         {value}
       </p>
       {hint && <p className="mt-1 text-[12px] text-ink-tertiary">{hint}</p>}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  tone,
-  emphasis,
-  muted,
-}: {
-  label: string;
-  value: string;
-  tone?: 'pos' | 'neg';
-  emphasis?: boolean;
-  muted?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <span
-        className={cn(
-          'text-[13px]',
-          emphasis ? 'font-semibold text-ink' : 'text-ink-secondary',
-          muted && 'text-ink-tertiary',
-        )}
-      >
-        {label}
-      </span>
-      <span
-        className={cn(
-          'text-[13px] tabular-nums',
-          emphasis && 'text-[15px] font-semibold',
-          muted && 'text-ink-tertiary',
-          !muted && tone === 'pos' && 'text-emerald-600',
-          !muted && tone === 'neg' && 'text-rose-600',
-          !muted && !tone && 'text-ink-secondary',
-        )}
-      >
-        {value}
-      </span>
     </div>
   );
 }
