@@ -97,10 +97,18 @@ interface SectorSlice {
  * Cash belongs in the mix because the table answers "where is this portfolio's
  * money", and an uninvested balance is a real answer to that.
  */
-function buildSectorSlices(rows: HoldingsExportRow[], cashBalance: number): SectorSlice[] {
+function buildSectorSlices(
+  rows: HoldingsExportRow[],
+  cashBalance: number,
+  caps?: Record<string, MarketCapQuote>
+): SectorSlice[] {
   const totals = new Map<string, number>();
   for (const row of rows) {
-    const key = row.sector || 'Uncategorized';
+    // Commodity funds read as Commodities on both tables, whatever sector the
+    // holding carries (they were filed under Miscellaneous).
+    const key = isCommodityFund(row, caps?.[capKey(row)])
+      ? COMMODITIES
+      : row.sector || 'Uncategorized';
     totals.set(key, (totals.get(key) ?? 0) + row.currentValue);
   }
 
@@ -130,9 +138,18 @@ function buildSectorSlices(rows: HoldingsExportRow[], cashBalance: number): Sect
 
 /** One crore, in rupees. */
 const CRORE = 10_000_000;
-/** The firm's size bands, in INR crore: small up to 5,000; mid 5,001–50,000; large above. */
+/** The firm's Indian size bands, in INR crore: small up to 5,000; mid 5,001–50,000; large above. */
 const SMALL_CAP_MAX_CR = 5_000;
 const MID_CAP_MAX_CR = 50_000;
+
+/**
+ * The firm's US size bands, in USD billions, applied to the dollar cap itself
+ * (not an INR conversion): small below $10bn; mid $10bn to below $50bn; large
+ * $50bn and above.
+ */
+const BILLION = 1_000_000_000;
+const US_MID_CAP_MIN_BN = 10;
+const US_LARGE_CAP_MIN_BN = 50;
 
 /**
  * Band colours: one blue, deepest for large, because the bands are ordered —
@@ -144,24 +161,74 @@ const CAP_BANDS = [
   { label: 'Mid Cap', color: '9DC3E6' },
   { label: 'Small Cap', color: 'DEEBF7' },
 ] as const;
-const FUND_SLICE = { label: 'ETFs & Funds', color: 'CCB974' };
+const COMMODITIES = 'Commodities';
+const ETF = 'ETF';
+const COMMODITY_SLICE = { label: COMMODITIES, color: 'DDB892' };
+const FUND_SLICE = { label: ETF, color: 'CCB974' };
 const UNCLASSIFIED_SLICE = { label: 'Unclassified', color: '8C8C8C' };
 
-/** ETF units carry no market cap, and Yahoo types Indian ETFs as EQUITY — the name is the tell. */
-const FUND_NAME = /\b(ETF|BEES|FUND)\b/i;
+/**
+ * ETF units carry no market cap, and Yahoo types Indian ETFs as EQUITY — the
+ * name is the tell. iShares/SPDR catch trusts whose names say neither ("iShares
+ * Gold Trust"), so the Commodities line holds even when quotes are unavailable.
+ */
+const FUND_NAME = /\b(ETF|ETC|BEES|FUND|iShares|SPDR)\b/i;
 const FUND_QUOTE_TYPES = new Set(['ETF', 'MUTUALFUND']);
 
-type CapBucket = (typeof CAP_BANDS)[number]['label'] | 'ETFs & Funds' | 'Unclassified';
+/** What a commodity fund holds: the metal, energy or basket itself. */
+const COMMODITY_NAME =
+  /\b(gold|silver|copper|platinum|palladium|bullion|precious metals?|crude|oil|natural gas|commodit(?:y|ies))\b/i;
+/**
+ * …as opposed to the companies that dig it up. "Gold Miners ETF" and "Uranium
+ * Miners ETF" own equities, so they stay ETF rather than Commodities.
+ */
+const PRODUCER_NAME =
+  /\b(miners?|mining|producers?|explorers?|exploration|royalt(?:y|ies)|equipment|services|companies)\b/i;
+
+function isFund(row: HoldingsExportRow, quote: MarketCapQuote | undefined): boolean {
+  return FUND_NAME.test(row.name) || (!!quote?.quoteType && FUND_QUOTE_TYPES.has(quote.quoteType));
+}
+
+/** A fund holding a physical commodity or commodity futures (GLD, SLV, CPER, HDFCGOLD…). */
+function isCommodityFund(row: HoldingsExportRow, quote: MarketCapQuote | undefined): boolean {
+  return isFund(row, quote) && COMMODITY_NAME.test(row.name) && !PRODUCER_NAME.test(row.name);
+}
+
+type CapBucket =
+  | (typeof CAP_BANDS)[number]['label']
+  | typeof COMMODITIES
+  | typeof ETF
+  | 'Unclassified';
+
+/** Which band set a quote is measured against: dollars for US listings, crore otherwise. */
+function bandBasis(quote: MarketCapQuote | undefined): 'USD' | 'INR' {
+  return quote?.currency === 'USD' ? 'USD' : 'INR';
+}
 
 /**
- * Which band a position falls in. The bands meet at whole crores (5,000 is the
- * top of small, 5,001 the bottom of mid), so the cut is "at most" each ceiling
- * — a cap of 5,000.4 cr reads as mid rather than falling between the bands.
+ * Which line a position falls on. Commodity funds and other ETFs (country,
+ * thematic, index) are named lines of their own, since neither has a cap.
+ *
+ * Equities band by listing: a USD listing on its dollar cap against the US
+ * bands, anything else on its INR cap against the crore bands. The crore bands
+ * meet at whole crores (5,000 is the top of small, 5,001 the bottom of mid), so
+ * the cut is "at most" each ceiling; the US bands are "below $10bn" and
+ * "$50bn and above", so $10bn exactly is mid and $50bn exactly is large.
  */
 function capBucketOf(row: HoldingsExportRow, quote: MarketCapQuote | undefined): CapBucket {
-  if (FUND_NAME.test(row.name) || (quote?.quoteType && FUND_QUOTE_TYPES.has(quote.quoteType))) {
-    return 'ETFs & Funds';
+  if (isCommodityFund(row, quote)) return COMMODITIES;
+  if (isFund(row, quote)) return ETF;
+
+  if (bandBasis(quote) === 'USD') {
+    // An API build without `marketCap` leaves this unclassified rather than
+    // silently banding a US name in crore.
+    const bn = quote?.marketCap != null ? quote.marketCap / BILLION : null;
+    if (bn == null) return 'Unclassified';
+    if (bn < US_MID_CAP_MIN_BN) return 'Small Cap';
+    if (bn < US_LARGE_CAP_MIN_BN) return 'Mid Cap';
+    return 'Large Cap';
   }
+
   const crore = quote?.marketCapInr != null ? quote.marketCapInr / CRORE : null;
   if (crore == null) return 'Unclassified';
   if (crore <= SMALL_CAP_MAX_CR) return 'Small Cap';
@@ -203,7 +270,7 @@ function buildMarketCapSlices(
   });
 
   const slices = CAP_BANDS.map((b) => slice(b.label, totals.get(b.label) ?? 0, b.color));
-  for (const extra of [FUND_SLICE, UNCLASSIFIED_SLICE]) {
+  for (const extra of [FUND_SLICE, COMMODITY_SLICE, UNCLASSIFIED_SLICE]) {
     const value = totals.get(extra.label as CapBucket) ?? 0;
     if (value > 0) slices.push(slice(extra.label, value, extra.color));
   }
@@ -217,11 +284,31 @@ function marketCapFootnotes(
   caps: Record<string, MarketCapQuote>,
   asOf?: string
 ): string[] {
-  const notes = ['Small cap: up to 5,000 cr; Mid cap: 5,001-50,000 cr; Large cap: above 50,000 cr.'];
+  const US_BANDS = 'Small cap: below $10bn; Mid cap: $10bn to below $50bn; Large cap: $50bn and above.';
+  const IN_BANDS = 'Small cap: up to 5,000 cr; Mid cap: 5,001-50,000 cr; Large cap: above 50,000 cr.';
+
+  // State the band set(s) actually applied: by the equities that were banded,
+  // else (an all-ETF book) by whatever the book is listed in.
+  const equities = rows.filter((r) => !isFund(r, caps[capKey(r)]));
+  const basis = new Set((equities.length ? equities : rows).map((r) => bandBasis(caps[capKey(r)])));
+  const notes: string[] = [];
+  if (basis.has('USD') && basis.has('INR')) {
+    notes.push(`US-listed: ${US_BANDS}`, `India-listed: ${IN_BANDS}`);
+  } else {
+    notes.push(basis.has('USD') ? US_BANDS : IN_BANDS);
+  }
+
+  const buckets = new Set(rows.map((r) => capBucketOf(r, caps[capKey(r)])));
+  if (buckets.has(ETF) || buckets.has(COMMODITIES)) {
+    notes.push('ETF: country, thematic and index funds. Commodities: gold, silver and other commodity funds.');
+  }
+
   // Yahoo has only today's market cap. Price moves since a past statement date
   // can carry a name across a band edge, so a dated statement says which it used.
   if (asOf) notes.push(`Bands use current market capitalisation, not as of ${formatStatementDate(asOf)}.`);
-  if (rows.some((r) => { const c = caps[capKey(r)]?.currency; return !!c && c !== 'INR'; })) {
+  // Only listings banded in crore from another currency were FX-converted;
+  // US listings band on their dollar cap directly.
+  if (equities.some((r) => { const c = caps[capKey(r)]?.currency; return !!c && c !== 'INR' && c !== 'USD'; })) {
     notes.push('Non-INR market caps converted to INR at the current exchange rate.');
   }
   return notes;
@@ -418,7 +505,7 @@ export function buildClientHoldingsWorkbook(
   writeAllocationTable(sheet, blocksTop, SECTOR_FIRST_COL, {
     title: 'Sector Allocation',
     labelHeader: 'Sector',
-    slices: buildSectorSlices(rows, cashBalance),
+    slices: buildSectorSlices(rows, cashBalance, options.marketCaps),
   });
   if (options.marketCaps) {
     writeAllocationTable(sheet, blocksTop, MARKET_CAP_FIRST_COL, {

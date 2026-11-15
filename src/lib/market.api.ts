@@ -23,6 +23,11 @@ export interface SymbolLookup {
 export interface MarketCapQuote {
   /** In INR, converted from the listing currency where needed; null for ETFs, funds and unknowns. */
   marketCapInr: number | null;
+  /**
+   * The cap in its listing currency, unconverted; null with no cap. Optional
+   * because an API build older than this field omits it.
+   */
+  marketCap?: number | null;
   /** The currency the cap was reported in before conversion; null with no cap. */
   currency: string | null;
   /** Yahoo's quoteType for the held symbol ('EQUITY', 'ETF', …). */
