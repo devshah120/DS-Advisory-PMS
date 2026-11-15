@@ -15,6 +15,7 @@ import {
   moneyFormatter,
   NAVY,
   newDoc,
+  loadPdfFonts,
   pct,
   stampPageNumbers,
   STONE,
@@ -647,7 +648,8 @@ function riskNotes(a: RiskAnalysis): string[] {
   return notes;
 }
 
-export function downloadRiskReportPdf(input: RiskReportInput): void {
+export async function downloadRiskReportPdf(input: RiskReportInput): Promise<void> {
+  await loadPdfFonts();
   const doc = buildRiskReportPdf(input);
   doc.save(`${fileSlug(input.subject, 'risk-exposure', input.asOf)}.pdf`);
 }

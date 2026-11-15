@@ -22,6 +22,7 @@ import {
   moneyFormatter,
   NAVY,
   newDoc,
+  loadPdfFonts,
   PAGE_W,
   pct,
   stampPageNumbers,
@@ -503,7 +504,8 @@ function reviewNotes(input: ReviewPackInput, analysis: ReturnType<typeof analyse
   return notes;
 }
 
-export function downloadReviewPackPdf(input: ReviewPackInput): void {
+export async function downloadReviewPackPdf(input: ReviewPackInput): Promise<void> {
+  await loadPdfFonts();
   const doc = buildReviewPackPdf(input);
   const period = input.periodReturn ? `review-${input.periodReturn.label.replace(/[^\w]+/g, '-').toLowerCase()}` : 'review';
   doc.save(`${fileSlug(input.subject, period, input.asOf)}.pdf`);

@@ -199,7 +199,7 @@ export default function PerformancePage() {
           if (!familyState.periodReturn) return;
           if (format === 'pdf') {
             const { downloadFamilyPerformancePdf } = await import('@/lib/performancePdf');
-            downloadFamilyPerformancePdf(familyState.periodReturn, currency);
+            await downloadFamilyPerformancePdf(familyState.periodReturn, currency);
           } else {
             await downloadFamilyPerformanceWorkbook(familyState.periodReturn, currency);
           }
@@ -207,7 +207,7 @@ export default function PerformancePage() {
           if (!periodState.periodReturn) return;
           if (format === 'pdf') {
             const { downloadPeriodPerformancePdf } = await import('@/lib/performancePdf');
-            downloadPeriodPerformancePdf(
+            await downloadPeriodPerformancePdf(
               name,
               periodState.periodReturn,
               periodState.asOf,

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { applyWorkbookFont } from './excelFont';
 import { marketApi, type MarketCapQuote } from './market.api';
 
 /**
@@ -761,6 +762,7 @@ function slugify(name: string): string {
 }
 
 async function saveWorkbook(wb: ExcelJS.Workbook, filename: string): Promise<void> {
+  applyWorkbookFont(wb);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

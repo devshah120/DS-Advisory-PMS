@@ -419,7 +419,7 @@ export function ReportGeneratorModal({
           await downloadClientHoldingsWorkbook(data.name, rows, data.cashBalance);
         }
       } else {
-        downloadRiskReportPdf({
+        await downloadRiskReportPdf({
           subject: data.name,
           subjectKind: data.kind,
           currency: data.currency,

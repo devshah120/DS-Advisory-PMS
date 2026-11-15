@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { applyWorkbookFont } from './excelFont';
 import { CapitalGainsReport, RealizedGainRow } from '@/types/reports';
 
 /**
@@ -470,6 +471,7 @@ export async function buildCapitalGainsWorkbook(
 
 export async function downloadCapitalGainsWorkbook(report: CapitalGainsReport): Promise<void> {
   const wb = await buildCapitalGainsWorkbook(report);
+  applyWorkbookFont(wb);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

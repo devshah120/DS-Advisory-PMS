@@ -295,9 +295,9 @@ export function PerformanceSummaryModal({
       );
 
       if (subject?.kind === 'family') {
-        downloadFamilyPerformancePdf(result as FamilyPeriodReturn, currency);
+        await downloadFamilyPerformancePdf(result as FamilyPeriodReturn, currency);
       } else {
-        downloadPeriodPerformancePdf(subjectName, result as PeriodReturn, asOf, currency);
+        await downloadPeriodPerformancePdf(subjectName, result as PeriodReturn, asOf, currency);
       }
       toast({
         tone: 'success',

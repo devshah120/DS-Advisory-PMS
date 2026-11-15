@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { applyWorkbookFont } from './excelFont';
 import {
   ClientFeeRow,
   FamilyFeeInvoice,
@@ -456,6 +457,7 @@ function writeClientWorkingSheet(
 
 export async function downloadClientFeeWorkbook(fee: ClientFeeRow): Promise<void> {
   const wb = await buildClientFeeWorkbook(fee);
+  applyWorkbookFont(wb);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -824,6 +826,7 @@ function writeAccountDetailSheet(
 
 export async function downloadFamilyInvoiceWorkbook(invoice: FamilyFeeInvoice): Promise<void> {
   const wb = await buildFamilyInvoiceWorkbook(invoice);
+  applyWorkbookFont(wb);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

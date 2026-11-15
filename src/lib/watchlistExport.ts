@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { applyWorkbookFont } from './excelFont';
 import { displayTicker } from '@/lib/market-scope';
 import type {
   ClientPortfolioWatchlist,
@@ -7,7 +8,7 @@ import type {
   PositionWindowReturn,
 } from '@/types';
 
-const FONT_NAME = 'Calibri';
+const FONT_NAME = 'Perpetua';
 const BODY_SIZE = 11;
 
 /** One decimal on returns, as the desk reads them; two on contributions, which run smaller. */
@@ -218,6 +219,7 @@ export async function downloadWatchlistWorkbook(
   rows: ClientWatchlistRow[]
 ): Promise<void> {
   const wb = buildWatchlistWorkbook(data, rows);
+  applyWorkbookFont(wb);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
