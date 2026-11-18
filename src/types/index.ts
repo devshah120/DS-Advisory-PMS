@@ -546,11 +546,7 @@ export interface PortfolioEvent {
   type: PortfolioEventType;
   /** PART 54's badge letters: E, D, S, B, R, M, T, C. */
   code: string;
-  /**
-   * Set only on rows from the Corporate Action Engine — the Yahoo calendar
-   * rows have no action behind them to open. Presence of this field is what
-   * makes a row clickable through to the Review Center.
-   */
+  /** Set only on rows from the Corporate Action Engine; Yahoo calendar rows have none. */
   corporateActionId?: string;
   corporateActionStatus?: string;
   /** Ratio or per-share amount, already formatted ('2:1', '$1.00/share'). */
