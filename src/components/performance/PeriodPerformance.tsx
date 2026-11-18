@@ -603,8 +603,8 @@ function WindowNotes({ r }: { r: PeriodReturn }) {
 
   if (r.daysClamped > 0 && r.nominalFrom) {
     notes.push(
-      `Measured from inception (30 Jun 2026); ${r.label} nominally opens ${fmtDate(r.nominalFrom)} — ` +
-        `${r.daysClamped} days excluded.`,
+      `Measured from inception (the ${fmtDate(r.from)} close); ${r.label} would open on the ` +
+        `${fmtDate(r.nominalFrom)} close — ${r.daysClamped} days excluded.`,
     );
   }
   if (r.openPeriod) {
