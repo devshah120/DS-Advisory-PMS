@@ -558,7 +558,18 @@ export interface PortfolioEvent {
   source?: string;
   label: string;
   date: string;
-  status: 'Upcoming' | 'Confirmed';
+  /**
+   * 'Upcoming' and 'Confirmed' are the Yahoo calendar's words (date estimated
+   * or announced). 'Processed' and 'Not processed' appear only on corporate
+   * actions: 'Not processed' means the date has passed and the engine has not
+   * yet applied the action to holdings.
+   */
+  status: 'Upcoming' | 'Confirmed' | 'Processed' | 'Not processed';
+  /**
+   * Per-share cash declared for this specific event. Set only on corporate-action
+   * rows. It is one payment, unlike `dividendRate`, which is an annual rate.
+   */
+  declaredAmount: number | null;
   /** The book this ticker trades in — the calendar never mixes the two. */
   market: Market;
   /** Tracked but not yet owned: on the watchlist with no client holding it. */

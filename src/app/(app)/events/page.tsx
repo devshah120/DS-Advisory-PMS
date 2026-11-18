@@ -60,6 +60,17 @@ const TYPE_FILTERS: Array<{ value: PortfolioEventType | 'ALL'; label: string }> 
   { value: 'OTHER_CORPORATE_ACTION', label: 'Other' },
 ];
 
+/**
+ * Badge tone per status. 'Not processed' is red because it is the only status
+ * that asks the desk to act: the date has passed and the ledger has not caught up.
+ */
+const STATUS_TONE: Record<PortfolioEvent['status'], 'success' | 'warning' | 'danger'> = {
+  Confirmed: 'success',
+  Processed: 'success',
+  Upcoming: 'warning',
+  'Not processed': 'danger',
+};
+
 /** Reads the inferred payout count back as the word an advisor would use. */
 const FREQUENCY_LABEL: Record<number, string> = {
   1: 'annual',
@@ -123,6 +134,9 @@ function HolderBreakdown({ event, currency }: {
   const isDividend = event.type === 'DIVIDEND';
   const hasAmounts = isDividend && event.totalAnnualAmount != null;
   const hasEstimate = isDividend && event.totalEstimatedAmount != null;
+  // A declared amount is the issuer's figure for this payment, not a rate
+  // divided by a guessed frequency, so it is labelled differently.
+  const isDeclared = isDividend && event.declaredAmount != null;
 
   return (
     <div className="w-full rounded-xl border border-border bg-surface p-3 text-left shadow-lg">
@@ -136,6 +150,11 @@ function HolderBreakdown({ event, currency }: {
             {event.payoutsPerYear ? ` · ${FREQUENCY_LABEL[event.payoutsPerYear] ?? 'annual'}` : ''}
           </p>
         )}
+        {isDeclared && (
+          <p className="shrink-0 text-xs text-ink-tertiary">
+            {formatCurrency(event.declaredAmount!, currency)}/sh · declared
+          </p>
+        )}
       </div>
 
       {/* A split moves share counts, not cash — saying so beats an empty amount column. */}
@@ -144,7 +163,7 @@ function HolderBreakdown({ event, currency }: {
           A split changes share counts, not cash. Quantities shown are pre-split.
         </p>
       )}
-      {isDividend && !hasAmounts && (
+      {isDividend && !hasAmounts && !isDeclared && (
         <p className="mb-2 text-xs text-ink-tertiary">
           No dividend rate published for this name — quantities only.
         </p>
@@ -203,7 +222,12 @@ function HolderBreakdown({ event, currency }: {
         </table>
       </div>
 
-      {hasEstimate && (
+      {hasEstimate && isDeclared && (
+        <p className="mt-2 border-t border-border pt-1.5 text-[11px] leading-snug text-ink-tertiary">
+          &ldquo;This pay&rdquo; is the declared amount per share times the shares held today.
+        </p>
+      )}
+      {hasEstimate && !isDeclared && (
         <p className="mt-2 border-t border-border pt-1.5 text-[11px] leading-snug text-ink-tertiary">
           &ldquo;This pay&rdquo; is the annual rate divided by the{' '}
           {FREQUENCY_LABEL[event.payoutsPerYear!] ?? 'annual'} payout frequency — an estimate, not a
@@ -369,12 +393,28 @@ export default function EventCenterPage() {
       // Sorts on the whole book's annual entitlement rather than the per-share
       // rate: "which event pays my clients the most" is the question the desk
       // actually sorts this column to answer.
-      accessor: (e) => e.totalAnnualAmount ?? 0,
+      // A corporate-action dividend has no annual figure, only its declared
+      // payment, so that is what it sorts on.
+      accessor: (e) => e.totalAnnualAmount ?? e.totalEstimatedAmount ?? 0,
       align: 'right',
       render: (e) => {
         if (e.type !== 'DIVIDEND') {
           // Splits carry a ratio in the label already; earnings carry no amount.
           return <span className="text-ink-tertiary">—</span>;
+        }
+        // Checked before the annual rate: corporate-action rows carry the
+        // issuer's declared payment and never an annual rate, which is why they
+        // used to fall through to "Rate n/a".
+        if (e.declaredAmount != null) {
+          return (
+            <div className="leading-tight">
+              <p className="tabular-nums font-medium text-ink">
+                {formatCurrency(e.declaredAmount, currency)}
+                <span className="text-ink-tertiary">/sh</span>
+              </p>
+              <p className="text-xs text-ink-tertiary">declared</p>
+            </div>
+          );
         }
         if (e.dividendRate == null) {
           return <span className="text-ink-tertiary">Rate n/a</span>;
@@ -414,7 +454,15 @@ export default function EventCenterPage() {
       accessor: (e) => e.status,
       sortable: false,
       render: (e) => (
-        <Badge tone={e.status === 'Confirmed' ? 'success' : 'warning'} dot>
+        <Badge
+          tone={STATUS_TONE[e.status]}
+          dot
+          title={
+            e.status === 'Not processed' && e.corporateActionStatus
+              ? `Date has passed; engine stage: ${e.corporateActionStatus.replace(/_/g, ' ').toLowerCase()}`
+              : undefined
+          }
+        >
           {e.status}
         </Badge>
       ),
@@ -473,6 +521,11 @@ export default function EventCenterPage() {
                   key: 'dividendRate',
                   header: `Dividend / Share (annual, ${currency})`,
                   accessor: (e: PortfolioEvent) => e.dividendRate ?? '',
+                },
+                {
+                  key: 'declaredAmount',
+                  header: `Declared / Share (${currency})`,
+                  accessor: (e: PortfolioEvent) => e.declaredAmount ?? '',
                 },
                 {
                   key: 'totalEstimated',
