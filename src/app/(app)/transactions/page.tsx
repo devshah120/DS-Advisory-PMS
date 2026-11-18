@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet, Layers, List, Trash2, Pencil, AlertTriangle } from 'lucide-react';
+import { ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Coins, Plus, Wallet, Layers, List, Trash2, Pencil, AlertTriangle, Upload } from 'lucide-react';
 import { clientsApi } from '@/lib/clients.api';
 import { transactionsApi } from '@/lib/transactions.api';
 import { formatCurrency, formatCompactCurrency, cn } from '@/lib/utils';
@@ -11,6 +11,7 @@ import { usePageHeading } from '@/components/layout/PageHeaderContext';
 import { useMarket } from '@/components/layout/MarketContext';
 import { CashFlowModal } from '@/components/transactions/CashFlowModal';
 import { DividendModal } from '@/components/transactions/DividendModal';
+import { BulkImportModal } from '@/components/transactions/BulkImportModal';
 import { GroupedByDate } from '@/components/transactions/GroupedByDate';
 import {
   Card,
@@ -54,6 +55,7 @@ export default function TransactionsPage() {
   const [grouped, setGrouped] = useState(false);
   const [flowModalOpen, setFlowModalOpen] = useState(false);
   const [dividendModalOpen, setDividendModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   // Deleting is staged rather than immediate: a transaction is ledger data, and
   // removing one silently rewrites the client's XIRR. `pending` holds the rows
@@ -63,42 +65,44 @@ export default function TransactionsPage() {
   const [deleting, setDeleting] = useState(false);
 
 
+  async function loadLedger() {
+    setLoading(true);
+    try {
+      // Both go through the api modules rather than raw axios: /clients returns a
+      // paginated envelope, not a bare array, and clientsApi.list() is the one place
+      // that unwraps it. Reading `res.data` here directly hands back {data, total,
+      // page} — which type-asserts to Client[] happily and then explodes on .filter.
+      const [txList, clientList] = await Promise.all([
+        transactionsApi.list(),
+        clientsApi.list({ limit: 500, market }),
+      ]);
+
+      setClients(clientList);
+      // The ledger endpoint has no market filter of its own, so the book is
+      // applied here by keeping only rows whose client is in the selected
+      // book. Done with a Set rather than a .find per row because the ledger
+      // is the largest collection on this screen. A transaction whose client
+      // is missing is dropped rather than shown unattributed — it belongs to
+      // the other book by definition.
+      const inBook = new Set(clientList.map((c) => c.id));
+      setTxns(
+        txList
+          .filter((tx) => inBook.has(tx.clientId))
+          .map((tx) => ({
+            ...tx,
+            client: clientList.find((cl) => cl.id === tx.clientId),
+          }))
+      );
+    } catch {
+      toast({ tone: 'error', title: 'Failed to load transactions' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!marketReady) return;
-    (async () => {
-      setLoading(true);
-      try {
-        // Both go through the api modules rather than raw axios: /clients returns a
-        // paginated envelope, not a bare array, and clientsApi.list() is the one place
-        // that unwraps it. Reading `res.data` here directly hands back {data, total,
-        // page} — which type-asserts to Client[] happily and then explodes on .filter.
-        const [txList, clientList] = await Promise.all([
-          transactionsApi.list(),
-          clientsApi.list({ limit: 500, market }),
-        ]);
-
-        setClients(clientList);
-        // The ledger endpoint has no market filter of its own, so the book is
-        // applied here by keeping only rows whose client is in the selected
-        // book. Done with a Set rather than a .find per row because the ledger
-        // is the largest collection on this screen. A transaction whose client
-        // is missing is dropped rather than shown unattributed — it belongs to
-        // the other book by definition.
-        const inBook = new Set(clientList.map((c) => c.id));
-        setTxns(
-          txList
-            .filter((tx) => inBook.has(tx.clientId))
-            .map((tx) => ({
-              ...tx,
-              client: clientList.find((cl) => cl.id === tx.clientId),
-            }))
-        );
-      } catch {
-        toast({ tone: 'error', title: 'Failed to load transactions' });
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadLedger();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [market, marketReady]);
 
@@ -409,6 +413,13 @@ export default function TransactionsPage() {
         <>
                   <Button
                     variant="outline"
+                    leftIcon={<Upload className="h-4 w-4" />}
+                    onClick={() => setImportOpen(true)}
+                  >
+                    Bulk Import
+                  </Button>
+                  <Button
+                    variant="outline"
                     leftIcon={<Coins className="h-4 w-4" />}
                     onClick={() => setDividendModalOpen(true)}
                   >
@@ -679,6 +690,12 @@ export default function TransactionsPage() {
           ]);
           setView('income');
         }}
+      />
+
+      <BulkImportModal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={loadLedger}
       />
     </>
   );
